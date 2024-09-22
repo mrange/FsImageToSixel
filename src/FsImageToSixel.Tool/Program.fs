@@ -24,8 +24,10 @@ SOFTWARE.
 
 open System
 open System.Collections.Generic
+open System.Globalization
 open System.IO
 open System.Text
+open System.Threading
 
 open System.CommandLine
 
@@ -88,12 +90,16 @@ type OutputImagePath  =
     | OutputImagePath (_, fullPath) -> fullPath
     | OutputImageToStdOut           -> "STDOUT"
 
+// Found out the right way in System.CommandLine to send exit code from
+//  a command handler
+let mutable exitCode = 80
+
 let rootCommandHandler 
   (input          : string|null )
   (output         : string|null )
   (maxNoOfColors  : int         )
-  (scaleImage     : decimal     )
-  (imageRatio     : decimal     )
+  (scaleImage     : int         )
+  (imageRatio     : int         )
   (overwriteOutput: bool        )
   (escape         : bool        )
   (whatIf         : bool        )
@@ -110,15 +116,15 @@ let rootCommandHandler
         OutputImagePath (output, Path.GetFullPath output)
 
     hili "FsSixelImage.Tool - Converts image to sixel image"
-    infof "  Input image path         : %s" input.Pretty
-    infof "  Output sixel image path  : %s" output.Pretty
-    infof "  Max no of colors used    : %d" maxNoOfColors
-    infof "  Scale image by (%%)      : %f" scaleImage
-    infof "  Desired image ratio (%%) : %f" imageRatio
-    infof "  Max no of colors used    : %d" maxNoOfColors
-    infof "  Overwrite sixel image    : %A" overwriteOutput
-    infof "  Escape sixel image output: %A" escape
-    infof "  Skip writing sixel image : %A" whatIf
+    infof "  Input image path         : %s"   input.Pretty
+    infof "  Output sixel image path  : %s"   output.Pretty
+    infof "  Max no of colors used    : %d"   maxNoOfColors
+    infof "  Scale image by (%%)       : %d"  scaleImage
+    infof "  Desired image ratio (%%)  : %d"  imageRatio
+    infof "  Max no of colors used    : %d"   maxNoOfColors
+    infof "  Overwrite sixel image    : %A"   overwriteOutput
+    infof "  Escape sixel image output: %A"   escape
+    infof "  Skip writing sixel image : %A"   whatIf
 
     let (InputImagePath (_, fullInputPath)) = input
 
@@ -128,16 +134,16 @@ let rootCommandHandler
     if maxNoOfColors > 256 then
       abort 91 "Max no of colors must be between 2 and 256"
 
-    if scaleImage < 2M then
+    if scaleImage < 1 then
       abort 92 "Scale image must be between 1 and 1000 (%)"
 
-    if scaleImage > 1000M then
+    if scaleImage > 1000 then
       abort 93 "Scale image must be between 1 and 1000 (%)"
 
-    if imageRatio < 2M then
+    if imageRatio < 1 then
       abort 94 "Scale image must be between 1 and 1000 (%)"
 
-    if scaleImage > 1000M then
+    if imageRatio > 1000 then
       abort 95 "Scale image must be between 1 and 1000 (%)"
 
     if not (File.Exists fullInputPath) then
@@ -147,8 +153,33 @@ let rootCommandHandler
       match output with
       | OutputImagePath (_, fullPath) -> 
         if File.Exists fullPath then
-          abort 97 "Output file already exists, specify overwrite option to overwrite it"
-      | OutputImageToStdOut           -> ()
+          abort 97 "Output file already exists, use -oo to overwrite it"
+      | OutputImageToStdOut           -> 
+        // Detect if we are running a sixel capable device
+        
+        // Remove any potential input on the STDIN
+        while Console.KeyAvailable do
+          Console.ReadKey() |> ignore
+
+        // Ask the terminal what capabilities it has
+        Console.Write "\x1B[c"
+
+        // Wait for awhile to let the terminal respond
+        Thread.Sleep 100
+        let sb = StringBuilder ()
+
+        // Read all input available, non-blocking
+        while Console.KeyAvailable do
+          let key = Console.ReadKey ()
+          sb.Append key.KeyChar |> ignore
+
+        let response  = sb.ToString ()
+        // Quick-n-dirty way to detect sixel capability
+        let split     = response.Split ';'
+
+        // 4 is the sixel capability
+        if split |> Array.contains "4" |> not then
+          abort 98 "Your terminal doesn't seem to support sixel output, you can still write the image to a file using -o"
 
     hilif "Loading image: %s" fullInputPath
     use image = Image.Load<Rgba32> fullInputPath
@@ -156,8 +187,8 @@ let rootCommandHandler
 
     infof "Image size is: %dx%d" image.Width image.Height
 
-    let desiredWidth  = int (round (decimal image.Width) *(scaleImage/100M)*(imageRatio/100M))
-    let desiredHeight = int (round (decimal image.Height)*(scaleImage/100M))
+    let desiredWidth  = int (round (float image.Width )*(float scaleImage/100.)*(float imageRatio/100.))
+    let desiredHeight = int (round (float image.Height)*(float scaleImage/100.))
 
     infof "Desired image size is: %dx%d" desiredWidth desiredHeight
 
@@ -183,7 +214,7 @@ let rootCommandHandler
     let palette = Dictionary ()
 
     do
-      hili "Computing palette"
+      info "Computing palette"
       let pa = 
         PixelAccessorAction<Rgba32> (
           fun a -> 
@@ -255,8 +286,11 @@ let rootCommandHandler
                   ch tbw
                   if escape && tbw = '\\' then
                     ch tbw
-                  
+
+                // Overwrite current line with next color
                 ch '$'
+
+              // We are done with this line, goto next
               ch '-'
           )
       image.ProcessPixelRows pa
@@ -275,16 +309,22 @@ let rootCommandHandler
     
     good "We are done"
 
+    exitCode <- 0
+
   with
   | :? AbortException as e ->
-    // Already been logged
-    // e.Data0
-    ()
+    exitCode <- e.Data0
 
 [<EntryPoint>]
 let main 
   (args : string array)
   : int =
+  let invariant = CultureInfo.InvariantCulture
+  CultureInfo.CurrentCulture                <- invariant
+  CultureInfo.CurrentUICulture              <- invariant
+  CultureInfo.DefaultThreadCurrentCulture   <- invariant
+  CultureInfo.DefaultThreadCurrentUICulture <- invariant
+
   let inputOption = 
     Option<string>(
         aliases         = [|"-i"; "--input"|]
@@ -302,21 +342,21 @@ let main
     Option<int>(
         aliases         = [|"-max"; "--max-no-of-colors"|]
       , description     = "Max number of colors used (1-256)"
-      , getDefaultValue = fun () -> 127
+      , getDefaultValue = fun () -> 256
       )
 
   let scaleImageOption = 
-    Option<decimal>(
+    Option<int>(
         aliases         = [|"-s"; "--scale-image"|]
       , description     = "Scale image in %"
-      , getDefaultValue = fun () -> 100M
+      , getDefaultValue = fun () -> 25
       )
 
   let imageRatioOption = 
-    Option<decimal>(
+    Option<int>(
         aliases         = [|"-r"; "--image-ratio"|]
       , description     = "The ratio applied to the image in %. Default is 200 which scales width to 2x of height. Compensates for fonts being not square."
-      , getDefaultValue = fun () -> 200M
+      , getDefaultValue = fun () -> 200
       )
 
   let overwriteOutputOption = 
@@ -366,4 +406,6 @@ let main
     , whatIfOption
     )
 
-  rootCommand.Invoke args
+  rootCommand.Invoke args |> ignore
+
+  exitCode
