@@ -124,7 +124,7 @@ let rootCommandHandler
       else
         OutputImagePath (output, Path.GetFullPath output)
 
-    hili "FsSixelImage.Tool - Converts image to sixel image"
+    hili  "img2sixel - Converts image to sixel image"
     infof "  Input image path         : %s"   input.Pretty
     infof "  Output sixel image path  : %s"   output.Pretty
     infof "  Max no of colors used    : %d"   maxNoOfColors
@@ -390,7 +390,7 @@ let main
       , getDefaultValue = fun () -> false
       )
 
-  let rootCommand = RootCommand "FsSixelImage.Tool - Converts image to sixel image"
+  let rootCommand = RootCommand "img2sixel - Converts image to sixel image"
 
   ([|
       inputOption

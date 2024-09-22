@@ -1,13 +1,47 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <AssemblyName>img2sixel</AssemblyName>
     <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+
+    <Copyright>Copyright (c) Mårten Rånge</Copyright>
+    <Authors>Mårten Rånge</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/mrange/FsImageToSixel</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <Title>Tool for converting standard images into Sixel format</Title>
+    <Description>
+      A .NET tool for converting standard images into Sixel format, which produces multicolored, pixelated images displayable in terminals that support it (e.g., Windows Terminal 1.22+).
+    </Description>
+    <ToolCommandName>img2sixel</ToolCommandName>
+
+    <PackageTags>Tool;Image;Sixel</PackageTags>
+    <PackageOutputPath>./nupkg</PackageOutputPath>
+    <PackageIcon>assets/icon.png</PackageIcon>
+    <PackAsTool>true</PackAsTool>
+    <PackageId>FsImageToSixel.Tool</PackageId>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
   </PropertyGroup>
+
+
+  <ItemGroup>
+    <None Include="../../LICENSE" Pack="true" PackagePath="\" />
+    <None Include="../../NOTICE" Pack="true" PackagePath="\" />
+    <None Include="../../assets/icon.png" Pack="true" PackagePath="assets" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <Compile Include="Program.fs" />
   </ItemGroup>
+
+
+  <ItemGroup />
 
   <ItemGroup>
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.5" />
