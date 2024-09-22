@@ -29,6 +29,17 @@ open System.IO
 open System.Text
 open System.Threading
 
+open FSharp.Core.Printf
+
+(*
+# Dependencies
+1. **SixLabors.ImageSharp** – A powerful image processing library by SixLabors. 
+   ImageSharp is split-licensed under the Apache License 2.0 and a commercial 
+   license. For this open-source project, it qualifies for usage under the 
+   Apache 2.0 license, as it meets the criteria for open-source software use.
+2. **System.CommandLine** – A command-line parser library from Microsoft, 
+   licensed under the MIT License.
+*)
 open System.CommandLine
 
 // I use the excellent SixLabors ImageSharp for image processing
@@ -39,8 +50,6 @@ open SixLabors.ImageSharp
 open SixLabors.ImageSharp.PixelFormats
 open SixLabors.ImageSharp.Processing
 open SixLabors.ImageSharp.Processing.Processors.Quantization
-
-open FSharp.Core.Printf
 
 exception AbortException of (int)
 
@@ -233,6 +242,7 @@ let rootCommandHandler
     if whatIf then
       warn "Skipping writing of Sixel image"
     else
+      // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
       hili "Generating Sixel image"
 
       let palette = 

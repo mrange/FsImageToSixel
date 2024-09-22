@@ -1,0 +1,33 @@
+FsImageToSixel.Tool
+
+Copyright 2024 Mårten Rånge
+
+This product includes third-party dependencies that are licensed under different open-source licenses. Please refer to the LICENSE file for the full terms of the licenses.
+
+---
+
+## Attribution and Notices for Included Software
+
+### SixLabors.ImageSharp
+
+This project uses **SixLabors.ImageSharp**, a powerful image processing library.
+
+- License: Apache License, Version 2.0 (chosen for this open-source project) or Six Labors Commercial License
+- Copyright: © Six Labors
+- Source: https://github.com/SixLabors/ImageSharp
+
+SixLabors.ImageSharp is provided under a split license. This project is licensed under the Apache License 2.0, as it meets the criteria for open-source usage.
+
+SixLabors.ImageSharp split license can be found at: https://github.com/SixLabors/ImageSharp/blob/main/LICENSE
+The Apache License 2.0 can be found at: http://www.apache.org/licenses/LICENSE-2.0
+
+### System.CommandLine
+
+This project uses **System.CommandLine**, a command-line parser library from Microsoft.
+
+- License: MIT License
+- Copyright: © Microsoft
+- Source: https://github.com/dotnet/command-line-api
+
+System.CommandLine is provided under the MIT License, which can be found at:
+https://opensource.org/licenses/MIT
