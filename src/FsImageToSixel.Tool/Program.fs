@@ -92,8 +92,11 @@ let rootCommandHandler
   (input          : string|null )
   (output         : string|null )
   (maxNoOfColors  : int         )
+  (scaleImage     : decimal     )
+  (imageRatio     : decimal     )
   (overwriteOutput: bool        )
   (escape         : bool        )
+  (whatIf         : bool        )
   : unit =
   try
     // The input parameter is required and not expected to be null
@@ -110,31 +113,64 @@ let rootCommandHandler
     infof "  Input image path         : %s" input.Pretty
     infof "  Output sixel image path  : %s" output.Pretty
     infof "  Max no of colors used    : %d" maxNoOfColors
+    infof "  Scale image by (%%)      : %f" scaleImage
+    infof "  Desired image ratio (%%) : %f" imageRatio
+    infof "  Max no of colors used    : %d" maxNoOfColors
     infof "  Overwrite sixel image    : %A" overwriteOutput
     infof "  Escape sixel image output: %A" escape
+    infof "  Skip writing sixel image : %A" whatIf
 
     let (InputImagePath (_, fullInputPath)) = input
 
+    if maxNoOfColors < 2 then
+      abort 90 "Max no of colors must be between 2 and 256"
+
+    if maxNoOfColors > 256 then
+      abort 91 "Max no of colors must be between 2 and 256"
+
+    if scaleImage < 2M then
+      abort 92 "Scale image must be between 1 and 1000 (%)"
+
+    if scaleImage > 1000M then
+      abort 93 "Scale image must be between 1 and 1000 (%)"
+
+    if imageRatio < 2M then
+      abort 94 "Scale image must be between 1 and 1000 (%)"
+
+    if scaleImage > 1000M then
+      abort 95 "Scale image must be between 1 and 1000 (%)"
+
     if not (File.Exists fullInputPath) then
-      abort 90 "Input file doesn't exists"
+      abort 96 "Input file doesn't exists"
 
     if not overwriteOutput then
       match output with
       | OutputImagePath (_, fullPath) -> 
         if File.Exists fullPath then
-          abort 91 "Output file already exists, specify overwrite option to overwrite it"
+          abort 97 "Output file already exists, specify overwrite option to overwrite it"
       | OutputImageToStdOut           -> ()
-
-    if maxNoOfColors < 2 then
-      abort 92 "Max no of colors must be between 2 and 256"
-
-    if maxNoOfColors > 256 then
-      abort 93 "Max no of colors must be between 2 and 256"
 
     hilif "Loading image: %s" fullInputPath
     use image = Image.Load<Rgba32> fullInputPath
 
+
     infof "Image size is: %dx%d" image.Width image.Height
+
+    let desiredWidth  = int (round (decimal image.Width) *(scaleImage/100M)*(imageRatio/100M))
+    let desiredHeight = int (round (decimal image.Height)*(scaleImage/100M))
+
+    infof "Desired image size is: %dx%d" desiredWidth desiredHeight
+
+    do
+      hilif "Resizing image from %dx%d to: %dx%d" image.Width image.Height desiredWidth desiredHeight
+      let mutator (ctx : IImageProcessingContext) = 
+        let options = ResizeOptions (
+            Mode    = ResizeMode.Stretch
+          , Sampler = KnownResamplers.Hermite
+          , Size    = Size(int desiredWidth, int desiredHeight)
+          )
+        ignore <| ctx.Resize options
+      image.Mutate mutator
 
     do
       hilif "Quantizing image to %d colors" maxNoOfColors
@@ -161,9 +197,11 @@ let rootCommandHandler
       image.ProcessPixelRows pa
       infof "Found %d palette entries" palette.Count
       if palette.Count > maxNoOfColors then
-        abort 94 "The palette contains more than the desired max no of colors"
+        abort 99 "The palette contains more than the desired max no of colors"
 
-    do
+    if whatIf then
+      warn "Skipping writing of Sixel image"
+    else
       hili "Generating Sixel image"
 
       let palette = 
@@ -260,11 +298,25 @@ let main
       , description     = "Output sixel image page"
       )
 
-  let escapeOption = 
-    Option<bool>(
-        aliases         = [|"-e"; "--escape"|]
-      , description     = "Escape special characters"
-      , getDefaultValue = fun () -> false
+  let maxNoOfColorsOption = 
+    Option<int>(
+        aliases         = [|"-max"; "--max-no-of-colors"|]
+      , description     = "Max number of colors used (1-256)"
+      , getDefaultValue = fun () -> 127
+      )
+
+  let scaleImageOption = 
+    Option<decimal>(
+        aliases         = [|"-s"; "--scale-image"|]
+      , description     = "Scale image in %"
+      , getDefaultValue = fun () -> 100M
+      )
+
+  let imageRatioOption = 
+    Option<decimal>(
+        aliases         = [|"-r"; "--image-ratio"|]
+      , description     = "The ratio applied to the image in %. Default is 200 which scales width to 2x of height. Compensates for fonts being not square."
+      , getDefaultValue = fun () -> 200M
       )
 
   let overwriteOutputOption = 
@@ -274,20 +326,31 @@ let main
       , getDefaultValue = fun () -> false
       )
 
-  let maxNoOfColorsOption = 
-    Option<int>(
-        aliases         = [|"-max"; "--max-no-of-colors"|]
-      , description     = "Max number of colors used (1-256)"
-      , getDefaultValue = fun () -> 127
+  let escapeOption = 
+    Option<bool>(
+        aliases         = [|"-e"; "--escape"|]
+      , description     = "Escape special characters"
+      , getDefaultValue = fun () -> false
+      )
+
+  let whatIfOption = 
+    Option<bool>(
+        aliases         = [|"-wi"; "--what-if"|]
+      , description     = "Reads the image and compute size but don't generate the sixel image"
+      , getDefaultValue = fun () -> false
       )
 
   let rootCommand = RootCommand "FsSixelImage.Tool - Converts image to sixel image"
+
   ([|
-    inputOption
-    outputOption
-    maxNoOfColorsOption
-    overwriteOutputOption
-    escapeOption
+      inputOption
+      outputOption
+      maxNoOfColorsOption
+      scaleImageOption
+      imageRatioOption
+      overwriteOutputOption
+      escapeOption
+      whatIfOption
     |] : Option array) 
     |> Array.iter rootCommand.AddOption
 
@@ -296,8 +359,11 @@ let main
     , inputOption
     , outputOption
     , maxNoOfColorsOption
+    , scaleImageOption
+    , imageRatioOption
     , overwriteOutputOption
     , escapeOption
+    , whatIfOption
     )
 
   rootCommand.Invoke args
