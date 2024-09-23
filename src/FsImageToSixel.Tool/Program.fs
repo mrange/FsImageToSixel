@@ -124,7 +124,7 @@ let rootCommandHandler
       else
         OutputImagePath (output, Path.GetFullPath output)
 
-    hili  "img2sixel - Converts image to sixel image"
+    hili  "fsimg2sixel - Converts image to sixel image"
     infof "  Input image path         : %s"   input.Pretty
     infof "  Output sixel image path  : %s"   output.Pretty
     infof "  Max no of colors used    : %d"   maxNoOfColors
@@ -193,7 +193,6 @@ let rootCommandHandler
     hilif "Loading image: %s" fullInputPath
     use image = Image.Load<Rgba32> fullInputPath
 
-
     infof "Image size is: %dx%d" image.Width image.Height
 
     let desiredWidth  = int (round (float image.Width )*(float scaleImage/100.)*(float imageRatio/100.))
@@ -220,102 +219,122 @@ let rootCommandHandler
         ignore <| ctx.Quantize quantizer
       image.Mutate mutator
 
-    let palette = Dictionary ()
+    let frameCount = image.Frames.Count
 
-    do
-      info "Computing palette"
-      let pa = 
-        PixelAccessorAction<Rgba32> (
-          fun a -> 
-            for y = 0 to a.Height - 1 do
-              let row = a.GetRowSpan y
-              for x = 0 to a.Width - 1 do
-                let pix = row.[x]
-                if pix.A > 127uy then
-                  palette.TryAdd (pix.Rgb, palette.Count) |> ignore
-        )
-      image.ProcessPixelRows pa
-      infof "Found %d palette entries" palette.Count
-      if palette.Count > maxNoOfColors then
-        abort 99 "The palette contains more than the desired max no of colors"
+    infof "Found %d frames" frameCount
 
     if whatIf then
       warn "Skipping writing of Sixel image"
     else
-      // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
-      hili "Generating Sixel image"
-
-      let palette = 
-        palette
-        |> Array.ofSeq
-        |> Array.map (fun kv -> kv.Value, kv.Key)
-        |> Array.sortBy fst
-
-      let sb = StringBuilder ()
-
-      let inline str (s : string) = sb.Append s |> ignore
-      let inline ch  (c : char  ) = sb.Append c |> ignore
-      let inline strf fmt         = kprintf str fmt 
-
-      let toTop, sixelPrelude, sixelEpilogue =
-        if escape then
-          @"\x1B[H", @"\x1BPq", @"\x1B\\"
-        else
-          "\x1B[H", "\x1BPq", "\x1B\\"
-
-      // Move cursor to top
-      // str toTop
-      // Start the sixel bitmap
-      str sixelPrelude
-
-      for i, rgb in palette do
-        let inline f (v : byte) = int (round (float v*100./255.))
-        strf "#%d;2;%d;%d;%d" i (f rgb.R) (f rgb.G) (f rgb.B)
-
-      let pa = 
-        PixelAccessorAction<Rgba32> (
-          fun a -> 
-            let empty   : int array = Array.zeroCreate a.Width
-            let sixels  : int array = Array.zeroCreate a.Width
-            for y6 = 0 to a.Height/6-1 do
-              let y = y6*6
-              for i, rgb in palette do
-                Array.Copy (empty, sixels, sixels.Length)
-                str ("#" + string i)
-                let rem = min (a.Height - y - 1) 5
-                for i = 0 to rem do
-                  let y = y+i
-                  let row = a.GetRowSpan y
-                  for x = 0 to a.Width-1 do
-                    let pix = row.[x]
-                    if pix.A > 127uy && pix.Rgb = rgb then
-                      sixels.[x] <- sixels.[x] ||| (1 <<< i)
-
-                for x = 0 to a.Width-1 do
-                  let tbw = char (63+(sixels.[x]&&&0x3F))
-                  ch tbw
-                  if escape && tbw = '\\' then
-                    ch tbw
-
-                // Overwrite current line with next color
-                ch '$'
-
-              // We are done with this line, goto next
-              ch '-'
-          )
-      image.ProcessPixelRows pa
-
-      // End the sixel bitmap
-      str sixelEpilogue
-
-      let sixelData = sb.ToString ()
-
       match output with
       | OutputImagePath (_, fullPath) ->
-        hilif "Writing sixel image: %s" fullPath
-        File.WriteAllText (fullPath, sixelData, Encoding.ASCII)
+        hilif "Deleting existing sixel image: %s" fullPath
+        File.Delete fullPath
       | OutputImageToStdOut ->
-        Console.Write sixelData
+        ()
+
+      let palette = Dictionary ()
+      let sb      = StringBuilder ()
+
+      for frameNo = 0 to frameCount - 1 do
+        hilif "Processing frame #%d" (frameNo + 1)
+
+        let frame = image.Frames.[frameNo]
+
+        palette.Clear ()
+
+        do
+          info "Computing palette"
+          let pa = 
+            PixelAccessorAction<Rgba32> (
+              fun a -> 
+                for y = 0 to a.Height - 1 do
+                  let row = a.GetRowSpan y
+                  for x = 0 to a.Width - 1 do
+                    let pix = row.[x]
+                    if pix.A > 127uy then
+                      palette.TryAdd (pix.Rgb, palette.Count) |> ignore
+            )
+          frame.ProcessPixelRows pa
+          infof "Found %d palette entries" palette.Count
+          if palette.Count > maxNoOfColors then
+            abort 99 "The palette contains more than the desired max no of colors"
+
+        // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
+        hili "Generating Sixel image"
+
+        let palette = 
+          palette
+          |> Array.ofSeq
+          |> Array.map (fun kv -> kv.Value, kv.Key)
+          |> Array.sortBy fst
+
+        sb.Clear () |> ignore
+
+        let inline str (s : string) = sb.Append s |> ignore
+        let inline ch  (c : char  ) = sb.Append c |> ignore
+        let inline strf fmt         = kprintf str fmt 
+
+        let toTop, sixelPrelude, sixelEpilogue =
+          if escape then
+            @"\x1B[H", @"\x1BP7;1;q", @"\x1B\\"
+          else
+            "\x1B[H", "\x1BP7;1;q", "\x1B\\"
+        
+        // Move cursor to top
+        if frameCount > 1 then
+          str toTop
+        // Start the sixel bitmap
+        str sixelPrelude
+
+        for i, rgb in palette do
+          let inline f (v : byte) = int (round (float v*100./255.))
+          strf "#%d;2;%d;%d;%d" i (f rgb.R) (f rgb.G) (f rgb.B)
+
+        let pa = 
+          PixelAccessorAction<Rgba32> (
+            fun a -> 
+              let empty   : int array = Array.zeroCreate a.Width
+              let sixels  : int array = Array.zeroCreate a.Width
+              for y6 = 0 to a.Height/6-1 do
+                let y = y6*6
+                for i, rgb in palette do
+                  Array.Copy (empty, sixels, sixels.Length)
+                  str ("#" + string i)
+                  let rem = min (a.Height - y - 1) 5
+                  for i = 0 to rem do
+                    let y = y+i
+                    let row = a.GetRowSpan y
+                    for x = 0 to a.Width-1 do
+                      let pix = row.[x]
+                      if pix.A > 127uy && pix.Rgb = rgb then
+                        sixels.[x] <- sixels.[x] ||| (1 <<< i)
+
+                  for x = 0 to a.Width-1 do
+                    let tbw = char (63+(sixels.[x]&&&0x3F))
+                    ch tbw
+                    if escape && tbw = '\\' then
+                      ch tbw
+
+                  // Overwrite current line with next color
+                  ch '$'
+
+                // We are done with this line, goto next
+                ch '-'
+            )
+        frame.ProcessPixelRows pa
+
+        // End the sixel bitmap
+        str sixelEpilogue
+
+        let sixelData = sb.ToString ()
+
+        match output with
+        | OutputImagePath (_, fullPath) ->
+          hilif "Writing sixel image: %s" fullPath
+          File.AppendAllText(fullPath, sixelData)
+        | OutputImageToStdOut ->
+          Console.Write sixelData
     
     good "We are done"
 
@@ -359,14 +378,14 @@ let main
     Option<int>(
         aliases         = [|"-s"; "--scale-image"|]
       , description     = "Scale image in %"
-      , getDefaultValue = fun () -> 25
+      , getDefaultValue = fun () -> 50
       )
 
   let imageRatioOption = 
     Option<int>(
         aliases         = [|"-r"; "--image-ratio"|]
       , description     = "The ratio applied to the image in %. Default is 200 which scales width to 2x of height. Compensates for fonts being not square."
-      , getDefaultValue = fun () -> 200
+      , getDefaultValue = fun () -> 100
       )
 
   let overwriteOutputOption = 
@@ -390,7 +409,7 @@ let main
       , getDefaultValue = fun () -> false
       )
 
-  let rootCommand = RootCommand "img2sixel - Converts image to sixel image"
+  let rootCommand = RootCommand "fsimg2sixel - Converts image to sixel image"
 
   ([|
       inputOption
