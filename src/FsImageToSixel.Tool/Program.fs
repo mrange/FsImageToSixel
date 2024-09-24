@@ -33,18 +33,18 @@ open FSharp.Core.Printf
 
 (*
 # Dependencies
-1. **SixLabors.ImageSharp** – A powerful image processing library by SixLabors. 
-   ImageSharp is split-licensed under the Apache License 2.0 and a commercial 
-   license. For this open-source project, it qualifies for usage under the 
+1. **SixLabors.ImageSharp** – A powerful image processing library by SixLabors.
+   ImageSharp is split-licensed under the Apache License 2.0 and a commercial
+   license. For this open-source project, it qualifies for usage under the
    Apache 2.0 license, as it meets the criteria for open-source software use.
-2. **System.CommandLine** – A command-line parser library from Microsoft, 
+2. **System.CommandLine** – A command-line parser library from Microsoft,
    licensed under the MIT License.
 *)
 open System.CommandLine
 
 // I use the excellent SixLabors ImageSharp for image processing
 //  Note this library has a split license, basically for open source it's free,
-//  in a commercial setting it costs money. 
+//  in a commercial setting it costs money.
 //  There are more nuances to this, check the license file.
 open SixLabors.ImageSharp
 open SixLabors.ImageSharp.PixelFormats
@@ -75,7 +75,7 @@ let infof  fmt  = kprintf info fmt
 let warnf  fmt  = kprintf warn fmt
 let failf  fmt  = kprintf fail fmt
 
-let abort exitCode msg = 
+let abort exitCode msg =
   fail msg
   raise (AbortException exitCode)
 
@@ -83,17 +83,17 @@ let abortf exitCode fmt  = kprintf (abort exitCode) fmt
 
 let inline isNotNull o = not (isNull o)
 
-type InputImagePath   = 
+type InputImagePath   =
   | InputImagePath of string*string
 
   member x.Pretty : string =
     let (InputImagePath (_, fullPath)) = x
     fullPath
 
-type OutputImagePath  = 
+type OutputImagePath  =
   | OutputImagePath of string*string
   | OutputImageToStdOut
-  
+
   member x.Pretty : string =
     match x with
     | OutputImagePath (_, fullPath) -> fullPath
@@ -103,7 +103,34 @@ type OutputImagePath  =
 //  a command handler
 let mutable exitCode = 80
 
-let rootCommandHandler 
+module Loops =
+  let inline RLEToken escape (sb : StringBuilder) rep current =
+    let tbw = char (63+(current&&&0x3F))
+    if rep > 3 then
+      sb.Append '!' |> ignore
+      sb.Append rep |> ignore
+      sb.Append tbw |> ignore
+      if escape && tbw = '\\' then
+        sb.Append tbw |> ignore
+    else
+      for i = 0 to rep-1 do
+        sb.Append tbw |> ignore
+        if escape && tbw = '\\' then
+          sb.Append tbw |> ignore
+
+  let rec RLE escape (sixels : int array) (sb : StringBuilder) rep current i =
+    if i < sixels.Length then
+      let next = sixels.[i]
+      if next = current then
+        RLE escape sixels sb (rep + 1) current (i + 1)
+      else
+        RLEToken escape sb rep current
+        RLE escape sixels sb 1 next (i + 1)
+    else
+      RLEToken escape sb rep current
+
+
+let rootCommandHandler
   (input          : string|null )
   (output         : string|null )
   (maxNoOfColors  : int         )
@@ -118,7 +145,7 @@ let rootCommandHandler
     assert (isNotNull input)
 
     let input = InputImagePath (input, Path.GetFullPath input)
-    let output = 
+    let output =
       if isNull output then
         OutputImageToStdOut
       else
@@ -160,12 +187,12 @@ let rootCommandHandler
 
     if not overwriteOutput then
       match output with
-      | OutputImagePath (_, fullPath) -> 
+      | OutputImagePath (_, fullPath) ->
         if File.Exists fullPath then
           abort 97 "Output file already exists, use -oo to overwrite it"
-      | OutputImageToStdOut           -> 
+      | OutputImageToStdOut           ->
         // Detect if we are running a sixel capable device
-        
+
         // Remove any potential input on the STDIN
         while Console.KeyAvailable do
           Console.ReadKey() |> ignore
@@ -202,7 +229,7 @@ let rootCommandHandler
 
     do
       hilif "Resizing image from %dx%d to: %dx%d" image.Width image.Height desiredWidth desiredHeight
-      let mutator (ctx : IImageProcessingContext) = 
+      let mutator (ctx : IImageProcessingContext) =
         let options = ResizeOptions (
             Mode    = ResizeMode.Stretch
           , Sampler = KnownResamplers.Hermite
@@ -245,9 +272,9 @@ let rootCommandHandler
 
         do
           info "Computing palette"
-          let pa = 
+          let pa =
             PixelAccessorAction<Rgba32> (
-              fun a -> 
+              fun a ->
                 for y = 0 to a.Height - 1 do
                   let row = a.GetRowSpan y
                   for x = 0 to a.Width - 1 do
@@ -263,7 +290,7 @@ let rootCommandHandler
         // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
         hili "Generating Sixel image"
 
-        let palette = 
+        let palette =
           palette
           |> Array.ofSeq
           |> Array.map (fun kv -> kv.Value, kv.Key)
@@ -273,14 +300,15 @@ let rootCommandHandler
 
         let inline str (s : string) = sb.Append s |> ignore
         let inline ch  (c : char  ) = sb.Append c |> ignore
-        let strf fmt                = kprintf str fmt 
+        let inline num (i : int   ) = sb.Append i |> ignore
+        let strf fmt                = kprintf str fmt
 
         let toTop, sixelPrelude, sixelEpilogue =
           if escape then
             @"\x1B[H", @"\x1BP7;1;q", @"\x1B\\"
           else
             "\x1B[H", "\x1BP7;1;q", "\x1B\\"
-        
+
         // Move cursor to top if it's a multi frame image
         if frameCount > 1 then
           str toTop
@@ -291,9 +319,9 @@ let rootCommandHandler
           let inline f (v : byte) = int (round (float v*100./255.))
           strf "#%d;2;%d;%d;%d" i (f rgb.R) (f rgb.G) (f rgb.B)
 
-        let pa = 
+        let pa =
           PixelAccessorAction<Rgba32> (
-            fun a -> 
+            fun a ->
               let empty   : int array = Array.zeroCreate a.Width
               let sixels  : int array = Array.zeroCreate a.Width
               for y6 = 0 to a.Height/6-1 do
@@ -312,12 +340,10 @@ let rootCommandHandler
                         sixels.[x] <- sixels.[x] ||| (1 <<< i)
 
                   if ones > 0 then
-                    str ("#" + string i)
-                    for x = 0 to a.Width-1 do
-                      let tbw = char (63+(sixels.[x]&&&0x3F))
-                      ch tbw
-                      if escape && tbw = '\\' then
-                        ch tbw
+                    ch '#'
+                    num i
+                    Loops.RLE escape sixels sb 1 sixels.[0] 1
+
                     // Overwrite current line with next color
                     ch '$'
 
@@ -338,7 +364,7 @@ let rootCommandHandler
           File.AppendAllText(fullPath, sixelData)
         | OutputImageToStdOut ->
           Console.Write sixelData
-    
+
     good "We are done"
 
     exitCode <- 0
@@ -348,7 +374,7 @@ let rootCommandHandler
     exitCode <- e.Data0
 
 [<EntryPoint>]
-let main 
+let main
   (args : string array)
   : int =
   let invariant = CultureInfo.InvariantCulture
@@ -357,55 +383,55 @@ let main
   CultureInfo.DefaultThreadCurrentCulture   <- invariant
   CultureInfo.DefaultThreadCurrentUICulture <- invariant
 
-  let inputOption = 
+  let inputOption =
     Option<string>(
         aliases         = [|"-i"; "--input"|]
       , description     = "Input image path"
       , IsRequired      = true
       )
 
-  let outputOption = 
+  let outputOption =
     Option<string>(
         aliases         = [|"-o"; "--output"|]
       , description     = "Output sixel image page"
       )
 
-  let maxNoOfColorsOption = 
+  let maxNoOfColorsOption =
     Option<int>(
         aliases         = [|"-max"; "--max-no-of-colors"|]
       , description     = "Max number of colors used (1-256)"
       , getDefaultValue = fun () -> 256
       )
 
-  let scaleImageOption = 
+  let scaleImageOption =
     Option<int>(
         aliases         = [|"-s"; "--scale-image"|]
       , description     = "Scale image in %"
       , getDefaultValue = fun () -> 50
       )
 
-  let imageRatioOption = 
+  let imageRatioOption =
     Option<int>(
         aliases         = [|"-r"; "--image-ratio"|]
       , description     = "The ratio applied to the image in %. Default is 200 which scales width to 2x of height. Compensates for fonts being not square."
       , getDefaultValue = fun () -> 100
       )
 
-  let overwriteOutputOption = 
+  let overwriteOutputOption =
     Option<bool>(
         aliases         = [|"-oo"; "--overwrite-output"|]
       , description     = "If the output file exists should we overwrite it"
       , getDefaultValue = fun () -> false
       )
 
-  let escapeOption = 
+  let escapeOption =
     Option<bool>(
         aliases         = [|"-e"; "--escape"|]
       , description     = "Escape special characters"
       , getDefaultValue = fun () -> false
       )
 
-  let whatIfOption = 
+  let whatIfOption =
     Option<bool>(
         aliases         = [|"-wi"; "--what-if"|]
       , description     = "Reads the image and compute size but don't generate the sixel image"
@@ -423,7 +449,7 @@ let main
       overwriteOutputOption
       escapeOption
       whatIfOption
-    |] : Option array) 
+    |] : Option array)
     |> Array.iter rootCommand.AddOption
 
   rootCommand.SetHandler (
