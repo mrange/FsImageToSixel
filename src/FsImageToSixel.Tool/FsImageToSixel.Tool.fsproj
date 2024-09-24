@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <AssemblyName>img2sixel</AssemblyName>
+    <AssemblyName>fsimg2sixel</AssemblyName>
     <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -17,7 +17,7 @@
     <Description>
       A .NET tool for converting standard images into Sixel format, which produces multicolored, pixelated images displayable in terminals that support it (e.g., Windows Terminal 1.22+).
     </Description>
-    <ToolCommandName>img2sixel</ToolCommandName>
+    <ToolCommandName>fsimg2sixel</ToolCommandName>
 
     <PackageTags>Tool;Image;Sixel</PackageTags>
     <PackageOutputPath>./nupkg</PackageOutputPath>
