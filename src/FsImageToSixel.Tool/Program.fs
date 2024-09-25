@@ -136,6 +136,8 @@ let rootCommandHandler
   (maxNoOfColors  : int         )
   (scaleImage     : int         )
   (imageRatio     : int         )
+  (skip           : int         )
+  (take           : int         )
   (overwriteOutput: bool        )
   (escape         : bool        )
   (whatIf         : bool        )
@@ -157,7 +159,8 @@ let rootCommandHandler
     infof "  Max no of colors used    : %d"   maxNoOfColors
     infof "  Scale image by (%%)       : %d"  scaleImage
     infof "  Desired image ratio (%%)  : %d"  imageRatio
-    infof "  Max no of colors used    : %d"   maxNoOfColors
+    infof "  Skip # of frames         : %d"   skip
+    infof "  Take at least # of frames: %d"   take
     infof "  Overwrite sixel image    : %A"   overwriteOutput
     infof "  Escape sixel image output: %A"   escape
     infof "  Skip writing sixel image : %A"   whatIf
@@ -182,14 +185,17 @@ let rootCommandHandler
     if imageRatio > 1000 then
       abort 95 "Scale image must be between 1 and 1000 (%)"
 
+    let skip      = max skip 0
+    let take      = max take 0
+
     if not (File.Exists fullInputPath) then
-      abort 96 "Input file doesn't exists"
+      abort 196 "Input file doesn't exists"
 
     if not overwriteOutput then
       match output with
       | OutputImagePath (_, fullPath) ->
         if File.Exists fullPath then
-          abort 97 "Output file already exists, use -oo to overwrite it"
+          abort 197 "Output file already exists, use -oo to overwrite it"
       | OutputImageToStdOut           ->
         // Detect if we are running a sixel capable device
 
@@ -215,7 +221,7 @@ let rootCommandHandler
 
         // 4 is the sixel capability
         if split |> Array.contains "4" |> not then
-          abort 98 "Your terminal doesn't seem to support sixel output, you can still write the image to a file using -o"
+          abort 198 "Your terminal doesn't seem to support sixel output, you can still write the image to a file using -o"
 
     hilif "Loading image: %s" fullInputPath
     use image = Image.Load<Rgba32> fullInputPath
@@ -248,7 +254,7 @@ let rootCommandHandler
 
     let frameCount = image.Frames.Count
 
-    infof "Found %d frames" frameCount
+    infof "Found %d frames in the image" frameCount
 
     if whatIf then
       warn "Skipping writing of Sixel image"
@@ -263,7 +269,8 @@ let rootCommandHandler
       let palette = Dictionary ()
       let sb      = StringBuilder ()
 
-      for frameNo = 0 to frameCount - 1 do
+      let stop    = skip + min take (frameCount - skip)
+      for frameNo = skip to stop-1 do
         hilif "Processing frame #%d" (frameNo + 1)
 
         let frame = image.Frames.[frameNo]
@@ -285,7 +292,7 @@ let rootCommandHandler
           frame.ProcessPixelRows pa
           infof "Found %d palette entries" palette.Count
           if palette.Count > maxNoOfColors then
-            abort 99 "The palette contains more than the desired max no of colors"
+            abort 199 "The palette contains more than the desired max no of colors"
 
         // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
         hili "Generating Sixel image"
@@ -418,6 +425,20 @@ let main
       , getDefaultValue = fun () -> 100
       )
 
+  let skipOption =
+    Option<int>(
+        aliases         = [|"-s"; "--skip-frames"|]
+      , description     = "How many frames to skip in a multi frame image."
+      , getDefaultValue = fun () -> 0
+      )
+
+  let takeOption =
+    Option<int>(
+        aliases         = [|"-t"; "--take-frames"|]
+      , description     = "How many frames to take in a multi frame image."
+      , getDefaultValue = fun () -> 100
+      )
+
   let overwriteOutputOption =
     Option<bool>(
         aliases         = [|"-oo"; "--overwrite-output"|]
@@ -448,18 +469,21 @@ let main
       scaleImageOption
       imageRatioOption
       overwriteOutputOption
+      skipOption
+      takeOption
       escapeOption
       whatIfOption
     |] : Option array)
     |> Array.iter rootCommand.AddOption
 
-  rootCommand.SetHandler (
-      rootCommandHandler
+  rootCommand.Handler <-Command.CR
     , inputOption
     , outputOption
     , maxNoOfColorsOption
     , scaleImageOption
     , imageRatioOption
+    , skipOption
+    , takeOption
     , overwriteOutputOption
     , escapeOption
     , whatIfOption
