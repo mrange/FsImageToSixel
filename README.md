@@ -35,6 +35,8 @@ dotnet run -c Release -- -i ../../assets/dotnet-bot_branded.png -s 100 -o ../../
 dotnet run -c Release -- -i ../../assets/icon.png -s 100 -o ../../assets/icon.txt -oo
 
 dotnet run -c Release -- -i ../../assets/cube1s.gif -s 100 -o ../../assets/cube1s.txt -oo
+
+dotnet run -c Release -- -ei -i ../../assets/cube1s.gif -s 100 -o ../../assets/cube1s_.txt -oo
 ```
 
 

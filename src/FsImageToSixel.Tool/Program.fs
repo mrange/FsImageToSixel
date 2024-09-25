@@ -135,7 +135,7 @@ let escapeOption =
 let enableIframeOption =
   Option<bool>(
       aliases         = [|"-ei"; "--enable-iframe"|]
-    , description     = "Enable 'iframe' like compression"
+    , description     = "Enable 'iframe' like compression (EXPERIMENTAL)"
     , getDefaultValue = fun () -> false
     )
 
@@ -221,7 +221,7 @@ let rootCommandHandler
   let enableIframe    = getValue enableIframeOption
   let whatIf          = getValue whatIfOption
 
-  let exitCode = 
+  let exitCode =
     try
       // The input parameter is required and not expected to be null
       assert (isNotNull input)
