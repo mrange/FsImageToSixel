@@ -25,3 +25,15 @@ cd src/FsImageToSixel.Tool
 # -h: Use -h or --help to print the help
 dotnet run -c Release -- -i ../../assets/dotnet-bot_branded.png -s 100
 ```
+
+## Generate reference assets
+
+```bash
+cd src/FsImageToSixel.Tool
+dotnet run -c Release -- -i ../../assets/dotnet-bot_branded.png -s 100 -o ../../assets/dotnet-bot_branded.txt -oo
+
+dotnet run -c Release -- -i ../../assets/icon.png -s 100 -o ../../assets/icon.txt -oo
+
+```
+
+
