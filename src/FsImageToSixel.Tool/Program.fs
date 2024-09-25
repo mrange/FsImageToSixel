@@ -41,6 +41,7 @@ open FSharp.Core.Printf
    licensed under the MIT License.
 *)
 open System.CommandLine
+open System.CommandLine.Invocation
 
 // I use the excellent SixLabors ImageSharp for image processing
 //  Note this library has a split license, basically for open source it's free,
@@ -83,6 +84,68 @@ let abortf exitCode fmt  = kprintf (abort exitCode) fmt
 
 let inline isNotNull o = not (isNull o)
 
+let inputOption =
+  Option<string>(
+      aliases         = [|"-i"; "--input"|]
+    , description     = "Input image path"
+    , IsRequired      = true
+    )
+
+let outputOption =
+  Option<string>(
+      aliases         = [|"-o"; "--output"|]
+    , description     = "Output sixel image page"
+    )
+
+let maxNoOfColorsOption =
+  Option<int>(
+      aliases         = [|"-max"; "--max-no-of-colors"|]
+    , description     = "Max number of colors used (1-256)"
+    , getDefaultValue = fun () -> 256
+    )
+
+let scaleImageOption =
+  Option<int>(
+      aliases         = [|"-s"; "--scale-image"|]
+    , description     = "Scale image in %"
+    , getDefaultValue = fun () -> 50
+    )
+
+let imageRatioOption =
+  Option<int>(
+      aliases         = [|"-r"; "--image-ratio"|]
+    , description     = "The ratio applied to the image in %. Default is 200 which scales width to 2x of height. Compensates for fonts being not square."
+    , getDefaultValue = fun () -> 100
+    )
+
+let overwriteOutputOption =
+  Option<bool>(
+      aliases         = [|"-oo"; "--overwrite-output"|]
+    , description     = "If the output file exists should we overwrite it"
+    , getDefaultValue = fun () -> false
+    )
+
+let escapeOption =
+  Option<bool>(
+      aliases         = [|"-e"; "--escape"|]
+    , description     = "Escape special characters"
+    , getDefaultValue = fun () -> false
+    )
+
+let enableIframeOption =
+  Option<bool>(
+      aliases         = [|"-ei"; "--enable-iframe"|]
+    , description     = "Enable 'iframe' like compression"
+    , getDefaultValue = fun () -> false
+    )
+
+let whatIfOption =
+  Option<bool>(
+      aliases         = [|"-wi"; "--what-if"|]
+    , description     = "Reads the image and compute size but don't generate the sixel image"
+    , getDefaultValue = fun () -> false
+    )
+
 type InputImagePath   =
   | InputImagePath of string*string
 
@@ -98,10 +161,6 @@ type OutputImagePath  =
     match x with
     | OutputImagePath (_, fullPath) -> fullPath
     | OutputImageToStdOut           -> "STDOUT"
-
-// Found out the right way in System.CommandLine to send exit code from
-//  a command handler
-let mutable exitCode = 80
 
 module Loops =
   let inline RLEToken escape (sb : StringBuilder) rep current =
@@ -148,245 +207,277 @@ let fillPixels (pixels : Rgba32 array) (frame : Rgba32 ImageFrame) width height 
   frame.ProcessPixelRows pa
 
 let rootCommandHandler
-  (input          : string|null )
-  (output         : string|null )
-  (maxNoOfColors  : int         )
-  (scaleImage     : int         )
-  (imageRatio     : int         )
-  (overwriteOutput: bool        )
-  (escape         : bool        )
-  (whatIf         : bool        )
+  (ctx            : InvocationContext )
   : unit =
-  try
-    // The input parameter is required and not expected to be null
-    assert (isNotNull input)
+  let inline getValue option = ctx.ParseResult.GetValueForOption option
 
-    let input = InputImagePath (input, Path.GetFullPath input)
-    let output =
-      if isNull output then
-        OutputImageToStdOut
-      else
-        OutputImagePath (output, Path.GetFullPath output)
+  let input           = getValue inputOption
+  let output          = getValue outputOption
+  let maxNoOfColors   = getValue maxNoOfColorsOption
+  let scaleImage      = getValue scaleImageOption
+  let imageRatio      = getValue imageRatioOption
+  let overwriteOutput = getValue overwriteOutputOption
+  let escape          = getValue escapeOption
+  let enableIframe    = getValue enableIframeOption
+  let whatIf          = getValue whatIfOption
 
-    hili  "fsimg2sixel - Converts image to sixel image"
-    infof "  Input image path         : %s"   input.Pretty
-    infof "  Output sixel image path  : %s"   output.Pretty
-    infof "  Max no of colors used    : %d"   maxNoOfColors
-    infof "  Scale image by (%%)       : %d"  scaleImage
-    infof "  Desired image ratio (%%)  : %d"  imageRatio
-    infof "  Max no of colors used    : %d"   maxNoOfColors
-    infof "  Overwrite sixel image    : %A"   overwriteOutput
-    infof "  Escape sixel image output: %A"   escape
-    infof "  Skip writing sixel image : %A"   whatIf
+  let exitCode = 
+    try
+      // The input parameter is required and not expected to be null
+      assert (isNotNull input)
 
-    let (InputImagePath (_, fullInputPath)) = input
+      let input = InputImagePath (input, Path.GetFullPath input)
+      let output =
+        if isNull output then
+          OutputImageToStdOut
+        else
+          OutputImagePath (output, Path.GetFullPath output)
 
-    if maxNoOfColors < 2 then
-      abort 90 "Max no of colors must be between 2 and 256"
+      hili  "fsimg2sixel - Converts image to sixel image"
+      infof "  Input image path         : %s"   input.Pretty
+      infof "  Output sixel image path  : %s"   output.Pretty
+      infof "  Max no of colors used    : %d"   maxNoOfColors
+      infof "  Scale image by (%%)       : %d"  scaleImage
+      infof "  Desired image ratio (%%)  : %d"  imageRatio
+      infof "  Max no of colors used    : %d"   maxNoOfColors
+      infof "  Overwrite sixel image    : %A"   overwriteOutput
+      infof "  Escape sixel image output: %A"   escape
+      infof "  'iframe' compression     : %A"   enableIframe
+      infof "  Skip writing sixel image : %A"   whatIf
 
-    if maxNoOfColors > 256 then
-      abort 91 "Max no of colors must be between 2 and 256"
+      let (InputImagePath (_, fullInputPath)) = input
 
-    if scaleImage < 1 then
-      abort 92 "Scale image must be between 1 and 1000 (%)"
+      if maxNoOfColors < 2 then
+        abort 90 "Max no of colors must be between 2 and 256"
 
-    if scaleImage > 1000 then
-      abort 93 "Scale image must be between 1 and 1000 (%)"
+      if maxNoOfColors > 256 then
+        abort 91 "Max no of colors must be between 2 and 256"
 
-    if imageRatio < 1 then
-      abort 94 "Scale image must be between 1 and 1000 (%)"
+      if scaleImage < 1 then
+        abort 92 "Scale image must be between 1 and 1000 (%)"
 
-    if imageRatio > 1000 then
-      abort 95 "Scale image must be between 1 and 1000 (%)"
+      if scaleImage > 1000 then
+        abort 93 "Scale image must be between 1 and 1000 (%)"
 
-    if not (File.Exists fullInputPath) then
-      abort 96 "Input file doesn't exists"
+      if imageRatio < 1 then
+        abort 94 "Scale image must be between 1 and 1000 (%)"
 
-    if not overwriteOutput then
-      match output with
-      | OutputImagePath (_, fullPath) ->
-        if File.Exists fullPath then
-          abort 97 "Output file already exists, use -oo to overwrite it"
-      | OutputImageToStdOut           ->
-        // Detect if we are running a sixel capable device
+      if imageRatio > 1000 then
+        abort 95 "Scale image must be between 1 and 1000 (%)"
 
-        // Remove any potential input on the STDIN
-        while Console.KeyAvailable do
-          Console.ReadKey() |> ignore
+      if not (File.Exists fullInputPath) then
+        abort 96 "Input file doesn't exists"
 
-        // Ask the terminal what capabilities it has
-        Console.Write "\x1B[c"
-
-        // Wait for awhile to let the terminal respond
-        Thread.Sleep 100
-        let sb = StringBuilder ()
-
-        // Read all input available, non-blocking
-        while Console.KeyAvailable do
-          let key = Console.ReadKey ()
-          sb.Append key.KeyChar |> ignore
-
-        let response  = sb.ToString ()
-        // Quick-n-dirty way to detect sixel capability
-        let split     = response.Split ';'
-
-        // 4 is the sixel capability
-        if split |> Array.contains "4" |> not then
-          abort 98 "Your terminal doesn't seem to support sixel output, you can still write the image to a file using -o"
-
-    hilif "Loading image: %s" fullInputPath
-    use image = Image.Load<Rgba32> fullInputPath
-
-    infof "Image size is: %dx%d" image.Width image.Height
-
-    let desiredWidth  = int (round (float image.Width )*(float scaleImage/100.)*(float imageRatio/100.))
-    let desiredHeight = int (round (float image.Height)*(float scaleImage/100.))
-
-    infof "Desired image size is: %dx%d" desiredWidth desiredHeight
-
-    do
-      hilif "Resizing image from %dx%d to: %dx%d" image.Width image.Height desiredWidth desiredHeight
-      let mutator (ctx : IImageProcessingContext) =
-        let options = ResizeOptions (
-            Mode    = ResizeMode.Stretch
-          , Sampler = KnownResamplers.Hermite
-          , Size    = Size(int desiredWidth, int desiredHeight)
-          )
-        ignore <| ctx.Resize options
-      image.Mutate mutator
-
-    do
-      hilif "Quantizing image to %d colors" maxNoOfColors
-      let mutator (ctx : IImageProcessingContext) =
-        let options   = QuantizerOptions (MaxColors = maxNoOfColors)
-        let quantizer = WuQuantizer options
-        ignore <| ctx.Quantize quantizer
-      image.Mutate mutator
-
-    let frameCount = image.Frames.Count
-
-    infof "Found %d frames" frameCount
-
-    if whatIf then
-      warn "Skipping writing of Sixel image"
-    else
-      match output with
-      | OutputImagePath (_, fullPath) ->
-        hilif "Deleting existing sixel image: %s" fullPath
-        File.Delete fullPath
-      | OutputImageToStdOut ->
-        ()
-
-      let palette = Dictionary ()
-      let sb      = StringBuilder ()
-
-      let inline str (s : string) = sb.Append s |> ignore
-      let inline ch  (c : char  ) = sb.Append c |> ignore
-      let inline num (i : int   ) = sb.Append i |> ignore
-      let strf fmt                = kprintf str fmt
-
-      let width   = image.Width
-      let height  = image.Height
-
-      let empty   : int array     = Array.zeroCreate width
-      let sixels  : int array     = Array.zeroCreate width
-      let pixels  : Rgba32 array  = Array.zeroCreate (width*height)
-
-      for frameNo = 0 to frameCount-1 do
-        hilif "Processing frame #%d" (frameNo + 1)
-
-        let frame = image.Frames.[frameNo]
-
-        sb.Clear () |> ignore
-
-        palette.Clear ()
-
-        fillPixels pixels frame width height
-
-        do
-          info "Computing palette"
-          for i = 0 to pixels.Length - 1 do
-            let pix = pixels.[i]
-            if pix.A > 127uy then
-              palette.TryAdd (pix.Rgb, palette.Count) |> ignore
-
-          infof "Found %d palette entries" palette.Count
-          if palette.Count > maxNoOfColors then
-            abort 99 "The palette contains more than the desired max no of colors"
-
-        let palette =
-          palette
-          |> Array.ofSeq
-          |> Array.map (fun kv -> kv.Value, kv.Key)
-          |> Array.sortBy fst
-
-        // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
-        hili "Generating Sixel image"
-
-        let toTop, sixelPrelude, sixelEpilogue =
-          if escape then
-            @"\x1B[H", @"\x1BP7;1;q", @"\x1B\\"
-          else
-            "\x1B[H", "\x1BP7;1;q", "\x1B\\"
-
-        // Move cursor to top if it's a multi frame image
-        if frameCount > 1 then
-          str toTop
-        // Start the sixel bitmap
-        str sixelPrelude
-
-        for i, rgb in palette do
-          let inline f (v : byte) = int (round (float v*100./255.))
-          strf "#%d;2;%d;%d;%d" i (f rgb.R) (f rgb.G) (f rgb.B)
-
-        let h6 = height/6
-        for y6 = 0 to h6-1 do
-          let y = y6*6
-          for i, rgb in palette do
-            let mutable ones = 0
-            Array.Copy (empty, sixels, sixels.Length)
-            let rem = min (height - y - 1) 5
-            for i = 0 to rem do
-              let bit   = 1 <<< i
-              let y     = y+i
-              let yoff  = width*y
-              for x = 0 to width-1 do
-                let pix = pixels.[yoff+x]
-                if pix.A > 127uy && rgb.R = pix.R && rgb.G = pix.G && rgb.B = pix.B then
-                  ones <- ones + 1
-                  sixels.[x] <- sixels.[x] ||| bit
-
-            if ones > 0 then
-              ch '#'
-              num i
-              Loops.RLE escape sixels sb 1 sixels.[0] 1
-
-              // Overwrite current line with next color
-              ch '$'
-
-
-          // We are done with this line, goto next
-          ch '-'
-
-        // End the sixel bitmap
-        str sixelEpilogue
-
-        let sixelData = sb.ToString ()
-
+      if not overwriteOutput then
         match output with
         | OutputImagePath (_, fullPath) ->
-          hilif "Writing sixel image: %s" fullPath
-          File.AppendAllText(fullPath, sixelData)
+          if File.Exists fullPath then
+            abort 97 "Output file already exists, use -oo to overwrite it"
+        | OutputImageToStdOut           ->
+          // Detect if we are running a sixel capable device
+
+          // Remove any potential input on the STDIN
+          while Console.KeyAvailable do
+            Console.ReadKey() |> ignore
+
+          // Ask the terminal what capabilities it has
+          Console.Write "\x1B[c"
+
+          // Wait for awhile to let the terminal respond
+          Thread.Sleep 100
+          let sb = StringBuilder ()
+
+          // Read all input available, non-blocking
+          while Console.KeyAvailable do
+            let key = Console.ReadKey ()
+            sb.Append key.KeyChar |> ignore
+
+          let response  = sb.ToString ()
+          // Quick-n-dirty way to detect sixel capability
+          let split     = response.Split ';'
+
+          // 4 is the sixel capability
+          if split |> Array.contains "4" |> not then
+            abort 98 "Your terminal doesn't seem to support sixel output, you can still write the image to a file using -o"
+
+      hilif "Loading image: %s" fullInputPath
+      use image = Image.Load<Rgba32> fullInputPath
+
+      infof "Image size is: %dx%d" image.Width image.Height
+
+      let desiredWidth  = int (round (float image.Width )*(float scaleImage/100.)*(float imageRatio/100.))
+      let desiredHeight = int (round (float image.Height)*(float scaleImage/100.))
+
+      infof "Desired image size is: %dx%d" desiredWidth desiredHeight
+
+      do
+        hilif "Resizing image from %dx%d to: %dx%d" image.Width image.Height desiredWidth desiredHeight
+        let mutator (ctx : IImageProcessingContext) =
+          let options = ResizeOptions (
+              Mode    = ResizeMode.Stretch
+            , Sampler = KnownResamplers.Hermite
+            , Size    = Size(int desiredWidth, int desiredHeight)
+            )
+          ignore <| ctx.Resize options
+        image.Mutate mutator
+
+      do
+        hilif "Quantizing image to %d colors" maxNoOfColors
+        let mutator (ctx : IImageProcessingContext) =
+          let options   = QuantizerOptions (MaxColors = maxNoOfColors)
+          let quantizer = WuQuantizer options
+          ignore <| ctx.Quantize quantizer
+        image.Mutate mutator
+
+      let frameCount = image.Frames.Count
+
+      infof "Found %d frames" frameCount
+
+      if whatIf then
+        warn "Skipping writing of Sixel image"
+      else
+        match output with
+        | OutputImagePath (_, fullPath) ->
+          hilif "Deleting existing sixel image: %s" fullPath
+          File.Delete fullPath
         | OutputImageToStdOut ->
-          Console.Write sixelData
+          ()
 
-    good "We are done"
+        let palette = Dictionary ()
+        let sb      = StringBuilder ()
 
-    exitCode <- 0
+        let inline str (s : string) = sb.Append s |> ignore
+        let inline ch  (c : char  ) = sb.Append c |> ignore
+        let inline num (i : int   ) = sb.Append i |> ignore
+        let strf fmt                = kprintf str fmt
 
-  with
-  | :? AbortException as e ->
-    exitCode <- e.Data0
+        let width   = image.Width
+        let height  = image.Height
+
+        let empty         : int array     = Array.zeroCreate width
+        let sixels        : int array     = Array.zeroCreate width
+        let mutable back  : Rgba32 array  = Array.zeroCreate (if enableIframe then width*height else 1)
+        let mutable front : Rgba32 array  = Array.zeroCreate (width*height)
+
+        for frameNo = 0 to frameCount-1 do
+          hilif "Processing frame #%d" (frameNo + 1)
+
+          let frame = image.Frames.[frameNo]
+
+          sb.Clear () |> ignore
+
+          palette.Clear ()
+
+          fillPixels front frame width height
+
+          do
+            info "Computing palette"
+            for i = 0 to front.Length - 1 do
+              let pix = front.[i]
+              if pix.A > 127uy then
+                palette.TryAdd (pix.Rgb, palette.Count) |> ignore
+
+            infof "Found %d palette entries" palette.Count
+            if palette.Count > maxNoOfColors then
+              abort 99 "The palette contains more than the desired max no of colors"
+
+          let palette =
+            palette
+            |> Array.ofSeq
+            |> Array.map (fun kv -> kv.Value, kv.Key)
+            |> Array.sortBy fst
+
+          // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
+          hili "Generating Sixel image"
+
+          let toTop, sixelPrelude, sixelEpilogue =
+            if escape then
+              @"\x1B[H", @"\x1BP7;1;q", @"\x1B\\"
+            else
+              "\x1B[H", "\x1BP7;1;q", "\x1B\\"
+
+          // Move cursor to top if it's a multi frame image
+          if frameCount > 1 then
+            str toTop
+          // Start the sixel bitmap
+          str sixelPrelude
+
+          for i, rgb in palette do
+            let inline f (v : byte) = int (round (float v*100./255.))
+            strf "#%d;2;%d;%d;%d" i (f rgb.R) (f rgb.G) (f rgb.B)
+
+          let h6 = height/6
+          for y6 = 0 to h6-1 do
+            let y = y6*6
+            for i, rgb in palette do
+              let mutable ones = 0
+              Array.Copy (empty, sixels, sixels.Length)
+              let rem = min (height - y - 1) 5
+              for i = 0 to rem do
+                let bit   = 1 <<< i
+                let y     = y+i
+                let yoff  = width*y
+                for x = 0 to width-1 do
+                  let fpix = front.[yoff+x]
+                  if rgb.R = fpix.R && rgb.G = fpix.G && rgb.B = fpix.B then
+                    if fpix.A > 127uy then
+                      if enableIframe then
+                        let bpix = back.[yoff+x]
+                        if bpix.A > 127uy && (bpix.R = fpix.R && bpix.G = fpix.G && bpix.B = fpix.B) then
+                          // Same as previous frame. Don't generate sixel
+                          ()
+                        else
+                          ones <- ones + 1
+                          sixels.[x] <- sixels.[x] ||| bit
+                      else
+                        ones <- ones + 1
+                        sixels.[x] <- sixels.[x] ||| bit
+
+              if ones > 0 then
+                ch '#'
+                num i
+                Loops.RLE escape sixels sb 1 sixels.[0] 1
+
+                // Overwrite current line with next color
+                ch '$'
+
+
+            // We are done with this line, goto next
+            ch '-'
+
+          // End the sixel bitmap
+          str sixelEpilogue
+
+          let sixelData = sb.ToString ()
+
+          match output with
+          | OutputImagePath (_, fullPath) ->
+            hilif "Writing sixel image: %s" fullPath
+            File.AppendAllText(fullPath, sixelData)
+          | OutputImageToStdOut ->
+            Console.Write sixelData
+
+          if enableIframe then
+            for i = 0 to front.Length - 1 do
+              let fpix = front.[i]
+              if fpix.A <= 127uy then
+                // The front pixel is transparent. Copy back into front
+                front.[i] <- back.[i]
+
+            // Swap front and back
+            let tmp = front
+            front <- back
+            back  <- tmp
+      good "We are done"
+
+      0
+    with
+    | :? AbortException as e ->
+      e.Data0
+
+  ctx.ExitCode <- exitCode
+
+  ()
 
 [<EntryPoint>]
 let main
@@ -398,61 +489,6 @@ let main
   CultureInfo.DefaultThreadCurrentCulture   <- invariant
   CultureInfo.DefaultThreadCurrentUICulture <- invariant
 
-  let inputOption =
-    Option<string>(
-        aliases         = [|"-i"; "--input"|]
-      , description     = "Input image path"
-      , IsRequired      = true
-      )
-
-  let outputOption =
-    Option<string>(
-        aliases         = [|"-o"; "--output"|]
-      , description     = "Output sixel image page"
-      )
-
-  let maxNoOfColorsOption =
-    Option<int>(
-        aliases         = [|"-max"; "--max-no-of-colors"|]
-      , description     = "Max number of colors used (1-256)"
-      , getDefaultValue = fun () -> 256
-      )
-
-  let scaleImageOption =
-    Option<int>(
-        aliases         = [|"-s"; "--scale-image"|]
-      , description     = "Scale image in %"
-      , getDefaultValue = fun () -> 50
-      )
-
-  let imageRatioOption =
-    Option<int>(
-        aliases         = [|"-r"; "--image-ratio"|]
-      , description     = "The ratio applied to the image in %. Default is 200 which scales width to 2x of height. Compensates for fonts being not square."
-      , getDefaultValue = fun () -> 100
-      )
-
-  let overwriteOutputOption =
-    Option<bool>(
-        aliases         = [|"-oo"; "--overwrite-output"|]
-      , description     = "If the output file exists should we overwrite it"
-      , getDefaultValue = fun () -> false
-      )
-
-  let escapeOption =
-    Option<bool>(
-        aliases         = [|"-e"; "--escape"|]
-      , description     = "Escape special characters"
-      , getDefaultValue = fun () -> false
-      )
-
-  let whatIfOption =
-    Option<bool>(
-        aliases         = [|"-wi"; "--what-if"|]
-      , description     = "Reads the image and compute size but don't generate the sixel image"
-      , getDefaultValue = fun () -> false
-      )
-
   let rootCommand = RootCommand "fsimg2sixel - Converts image to sixel image"
 
   ([|
@@ -463,22 +499,11 @@ let main
       imageRatioOption
       overwriteOutputOption
       escapeOption
+      enableIframeOption
       whatIfOption
     |] : Option array)
     |> Array.iter rootCommand.AddOption
 
-  rootCommand.SetHandler (
-      rootCommandHandler
-    , inputOption
-    , outputOption
-    , maxNoOfColorsOption
-    , scaleImageOption
-    , imageRatioOption
-    , overwriteOutputOption
-    , escapeOption
-    , whatIfOption
-    )
+  rootCommand.SetHandler rootCommandHandler
 
-  rootCommand.Invoke args |> ignore
-
-  exitCode
+  rootCommand.Invoke args
