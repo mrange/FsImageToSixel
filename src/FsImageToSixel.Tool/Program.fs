@@ -331,13 +331,14 @@ let rootCommandHandler
                   Array.Copy (empty, sixels, sixels.Length)
                   let rem = min (a.Height - y - 1) 5
                   for i = 0 to rem do
-                    let y = y+i
+                    let bit = 1 <<< i
+                    let y   = y+i
                     let row = a.GetRowSpan y
                     for x = 0 to a.Width-1 do
                       let pix = row.[x]
                       if pix.A > 127uy && rgb.R = pix.R && rgb.G = pix.G && rgb.B = pix.B then
                         ones <- ones + 1
-                        sixels.[x] <- sixels.[x] ||| (1 <<< i)
+                        sixels.[x] <- sixels.[x] ||| bit
 
                   if ones > 0 then
                     ch '#'
