@@ -130,6 +130,23 @@ module Loops =
       RLEToken escape sb rep current
 
 
+let fillPixels (pixels : Rgba32 array) (frame : Rgba32 ImageFrame) width height : unit =
+  let pa =
+    PixelAccessorAction<Rgba32> (
+      fun a ->
+        if a.Width <> width then
+          abortf 194 "Frame width %d don't match image width %d" a.Width width
+        if a.Height <> height then
+          abortf 195 "Frame height %d don't match image height %d" a.Height height
+        for y = 0 to height - 1 do
+          let yoff = width*y
+          let row = a.GetRowSpan y
+          for x = 0 to width - 1 do
+            pixels.[yoff+x] <- row.[x]
+
+    )
+  frame.ProcessPixelRows pa
+
 let rootCommandHandler
   (input          : string|null )
   (output         : string|null )
@@ -263,32 +280,39 @@ let rootCommandHandler
       let palette = Dictionary ()
       let sb      = StringBuilder ()
 
-      for frameNo = 0 to frameCount - 1 do
+      let inline str (s : string) = sb.Append s |> ignore
+      let inline ch  (c : char  ) = sb.Append c |> ignore
+      let inline num (i : int   ) = sb.Append i |> ignore
+      let strf fmt                = kprintf str fmt
+
+      let width   = image.Width
+      let height  = image.Height
+
+      let empty   : int array     = Array.zeroCreate width
+      let sixels  : int array     = Array.zeroCreate width
+      let pixels  : Rgba32 array  = Array.zeroCreate (width*height)
+
+      for frameNo = 0 to frameCount-1 do
         hilif "Processing frame #%d" (frameNo + 1)
 
         let frame = image.Frames.[frameNo]
 
+        sb.Clear () |> ignore
+
         palette.Clear ()
+
+        fillPixels pixels frame width height
 
         do
           info "Computing palette"
-          let pa =
-            PixelAccessorAction<Rgba32> (
-              fun a ->
-                for y = 0 to a.Height - 1 do
-                  let row = a.GetRowSpan y
-                  for x = 0 to a.Width - 1 do
-                    let pix = row.[x]
-                    if pix.A > 127uy then
-                      palette.TryAdd (pix.Rgb, palette.Count) |> ignore
-            )
-          frame.ProcessPixelRows pa
+          for i = 0 to pixels.Length - 1 do
+            let pix = pixels.[i]
+            if pix.A > 127uy then
+              palette.TryAdd (pix.Rgb, palette.Count) |> ignore
+
           infof "Found %d palette entries" palette.Count
           if palette.Count > maxNoOfColors then
             abort 99 "The palette contains more than the desired max no of colors"
-
-        // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
-        hili "Generating Sixel image"
 
         let palette =
           palette
@@ -296,12 +320,8 @@ let rootCommandHandler
           |> Array.map (fun kv -> kv.Value, kv.Key)
           |> Array.sortBy fst
 
-        sb.Clear () |> ignore
-
-        let inline str (s : string) = sb.Append s |> ignore
-        let inline ch  (c : char  ) = sb.Append c |> ignore
-        let inline num (i : int   ) = sb.Append i |> ignore
-        let strf fmt                = kprintf str fmt
+        // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
+        hili "Generating Sixel image"
 
         let toTop, sixelPrelude, sixelEpilogue =
           if escape then
@@ -319,40 +339,34 @@ let rootCommandHandler
           let inline f (v : byte) = int (round (float v*100./255.))
           strf "#%d;2;%d;%d;%d" i (f rgb.R) (f rgb.G) (f rgb.B)
 
-        let pa =
-          PixelAccessorAction<Rgba32> (
-            fun a ->
-              let empty   : int array = Array.zeroCreate a.Width
-              let sixels  : int array = Array.zeroCreate a.Width
-              for y6 = 0 to a.Height/6-1 do
-                let y = y6*6
-                for i, rgb in palette do
-                  let mutable ones = 0
-                  Array.Copy (empty, sixels, sixels.Length)
-                  let rem = min (a.Height - y - 1) 5
-                  for i = 0 to rem do
-                    let bit = 1 <<< i
-                    let y   = y+i
-                    let row = a.GetRowSpan y
-                    for x = 0 to a.Width-1 do
-                      let pix = row.[x]
-                      if pix.A > 127uy && rgb.R = pix.R && rgb.G = pix.G && rgb.B = pix.B then
-                        ones <- ones + 1
-                        sixels.[x] <- sixels.[x] ||| bit
+        let h6 = height/6
+        for y6 = 0 to h6-1 do
+          let y = y6*6
+          for i, rgb in palette do
+            let mutable ones = 0
+            Array.Copy (empty, sixels, sixels.Length)
+            let rem = min (height - y - 1) 5
+            for i = 0 to rem do
+              let bit   = 1 <<< i
+              let y     = y+i
+              let yoff  = width*y
+              for x = 0 to width-1 do
+                let pix = pixels.[yoff+x]
+                if pix.A > 127uy && rgb.R = pix.R && rgb.G = pix.G && rgb.B = pix.B then
+                  ones <- ones + 1
+                  sixels.[x] <- sixels.[x] ||| bit
 
-                  if ones > 0 then
-                    ch '#'
-                    num i
-                    Loops.RLE escape sixels sb 1 sixels.[0] 1
+            if ones > 0 then
+              ch '#'
+              num i
+              Loops.RLE escape sixels sb 1 sixels.[0] 1
 
-                    // Overwrite current line with next color
-                    ch '$'
+              // Overwrite current line with next color
+              ch '$'
 
 
-                // We are done with this line, goto next
-                ch '-'
-            )
-        frame.ProcessPixelRows pa
+          // We are done with this line, goto next
+          ch '-'
 
         // End the sixel bitmap
         str sixelEpilogue
