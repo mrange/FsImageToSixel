@@ -114,7 +114,21 @@ let scaleImageOption =
 let imageRatioOption =
   Option<int>(
       aliases         = [|"-r"; "--image-ratio"|]
-    , description     = "The ratio applied to the image in %. Default is 200 which scales width to 2x of height. Compensates for fonts being not square."
+    , description     = "The ratio applied to the image in %."
+    , getDefaultValue = fun () -> 100
+    )
+
+let skipFramesOption =
+  Option<int>(
+      aliases         = [|"-sf"; "--skip-frames"|]
+    , description     = "Skip # frames in a multi frame image"
+    , getDefaultValue = fun () -> 0
+    )
+
+let takeFramesOption =
+  Option<int>(
+      aliases         = [|"-tf"; "--take-frames"|]
+    , description     = "Takes at least # frames in a multi frame image"
     , getDefaultValue = fun () -> 100
     )
 
@@ -216,6 +230,8 @@ let rootCommandHandler
   let maxNoOfColors   = getValue maxNoOfColorsOption
   let scaleImage      = getValue scaleImageOption
   let imageRatio      = getValue imageRatioOption
+  let skipFrames      = getValue skipFramesOption
+  let takeFrames      = getValue takeFramesOption
   let overwriteOutput = getValue overwriteOutputOption
   let escape          = getValue escapeOption
   let enableIframe    = getValue enableIframeOption
@@ -240,6 +256,8 @@ let rootCommandHandler
       infof "  Scale image by (%%)       : %d"  scaleImage
       infof "  Desired image ratio (%%)  : %d"  imageRatio
       infof "  Max no of colors used    : %d"   maxNoOfColors
+      infof "  Skip # frames            : %A"   skipFrames
+      infof "  Take at least # frames   : %A"   takeFrames
       infof "  Overwrite sixel image    : %A"   overwriteOutput
       infof "  Escape sixel image output: %A"   escape
       infof "  'iframe' compression     : %A"   enableIframe
@@ -260,19 +278,25 @@ let rootCommandHandler
         abort 93 "Scale image must be between 1 and 1000 (%)"
 
       if imageRatio < 1 then
-        abort 94 "Scale image must be between 1 and 1000 (%)"
+        abort 94 "Image ratio must be between 1 and 1000 (%)"
 
       if imageRatio > 1000 then
-        abort 95 "Scale image must be between 1 and 1000 (%)"
+        abort 95 "Image ratio must be between 1 and 1000 (%)"
 
       if not (File.Exists fullInputPath) then
         abort 96 "Input file doesn't exists"
+
+      if skipFrames < 0 then
+        abort 97 "Skip frames must be at least 0"
+
+      if takeFrames < 0 then
+        abort 98 "Take frames must be at least 0"
 
       if not overwriteOutput then
         match output with
         | OutputImagePath (_, fullPath) ->
           if File.Exists fullPath then
-            abort 97 "Output file already exists, use -oo to overwrite it"
+            abort 197 "Output file already exists, use -oo to overwrite it"
         | OutputImageToStdOut           ->
           // Detect if we are running a sixel capable device
 
@@ -298,7 +322,7 @@ let rootCommandHandler
 
           // 4 is the sixel capability
           if split |> Array.contains "4" |> not then
-            abort 98 "Your terminal doesn't seem to support sixel output, you can still write the image to a file using -o"
+            abort 198 "Your terminal doesn't seem to support sixel output, you can still write the image to a file using -o"
 
       hilif "Loading image: %s" fullInputPath
       use image = Image.Load<Rgba32> fullInputPath
@@ -329,17 +353,20 @@ let rootCommandHandler
           ignore <| ctx.Quantize quantizer
         image.Mutate mutator
 
-      let frameCount = image.Frames.Count
+      let frameCount          = image.Frames.Count
+      let stop                = min frameCount (skipFrames+takeFrames)
+      let effectiveFrameCount = stop - skipFrames
 
-      infof "Found %d frames" frameCount
+      infof "Found %d frames"   frameCount
+      infof "Writing %d frames" effectiveFrameCount
 
       if whatIf then
         warn "Skipping writing of Sixel image"
       else
         match output with
         | OutputImagePath (_, fullPath) ->
-          hilif "Deleting existing sixel image: %s" fullPath
-          File.Delete fullPath
+          // We append to the text file, so we need to clear any existing ones
+          File.WriteAllText (fullPath, "", Encoding.ASCII)
         | OutputImageToStdOut ->
           ()
 
@@ -359,7 +386,7 @@ let rootCommandHandler
         let mutable back  : Rgba32 array  = Array.zeroCreate (if enableIframe then width*height else 1)
         let mutable front : Rgba32 array  = Array.zeroCreate (width*height)
 
-        for frameNo = 0 to frameCount-1 do
+        for frameNo = skipFrames to stop-1 do
           hilif "Processing frame #%d" (frameNo + 1)
 
           let frame = image.Frames.[frameNo]
@@ -379,7 +406,7 @@ let rootCommandHandler
 
             infof "Found %d palette entries" palette.Count
             if palette.Count > maxNoOfColors then
-              abort 99 "The palette contains more than the desired max no of colors"
+              abort 199 "The palette contains more than the desired max no of colors"
 
           let palette =
             palette
@@ -397,7 +424,7 @@ let rootCommandHandler
               "\x1B[H", "\x1BP7;1;q", "\x1B\\"
 
           // Move cursor to top if it's a multi frame image
-          if frameCount > 1 then
+          if effectiveFrameCount > 1 then
             str toTop
           // Start the sixel bitmap
           str sixelPrelude
@@ -497,6 +524,8 @@ let main
       maxNoOfColorsOption
       scaleImageOption
       imageRatioOption
+      skipFramesOption
+      takeFramesOption
       overwriteOutputOption
       escapeOption
       enableIframeOption
