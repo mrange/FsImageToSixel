@@ -132,6 +132,13 @@ let takeFramesOption =
     , getDefaultValue = fun () -> 100
     )
 
+let transparencyCutoffOption =
+  Option<byte>(
+      aliases         = [|"-tc"; "--transparency-cutoff"|]
+    , description     = "The transparency cutoff level (0-255)"
+    , getDefaultValue = fun () -> 127uy
+    )
+
 let overwriteOutputOption =
   Option<bool>(
       aliases         = [|"-oo"; "--overwrite-output"|]
@@ -220,6 +227,36 @@ let fillPixels (pixels : Rgba32 array) (frame : Rgba32 ImageFrame) width height 
     )
   frame.ProcessPixelRows pa
 
+let printFile name =
+  let baseDir  = AppDomain.CurrentDomain.BaseDirectory
+  let fileName = Path.GetFullPath (Path.Combine (baseDir, name))
+  let text     = File.ReadAllText fileName
+  Console.WriteLine text
+
+let noticeCommandHandler
+  (ctx            : InvocationContext )
+  : unit =
+
+  printFile "NOTICE"
+
+  ctx.ExitCode <- 0
+
+let readmeCommandHandler
+  (ctx            : InvocationContext )
+  : unit =
+
+  printFile "README.md"
+
+  ctx.ExitCode <- 0
+
+let licenseCommandHandler
+  (ctx            : InvocationContext )
+  : unit =
+
+  printFile "LICENSE"
+
+  ctx.ExitCode <- 0
+
 let rootCommandHandler
   (ctx            : InvocationContext )
   : unit =
@@ -232,6 +269,7 @@ let rootCommandHandler
   let imageRatio      = getValue imageRatioOption
   let skipFrames      = getValue skipFramesOption
   let takeFrames      = getValue takeFramesOption
+  let cutoff          = getValue transparencyCutoffOption
   let overwriteOutput = getValue overwriteOutputOption
   let escape          = getValue escapeOption
   let enableIframe    = getValue enableIframeOption
@@ -256,8 +294,9 @@ let rootCommandHandler
       infof "  Scale image by (%%)       : %d"  scaleImage
       infof "  Desired image ratio (%%)  : %d"  imageRatio
       infof "  Max no of colors used    : %d"   maxNoOfColors
-      infof "  Skip # frames            : %A"   skipFrames
-      infof "  Take at least # frames   : %A"   takeFrames
+      infof "  Skip # frames            : %d"   skipFrames
+      infof "  Take at least # frames   : %d"   takeFrames
+      infof "  Transparency cutoff      : %d"   cutoff
       infof "  Overwrite sixel image    : %A"   overwriteOutput
       infof "  Escape sixel image output: %A"   escape
       infof "  'iframe' compression     : %A"   enableIframe
@@ -401,7 +440,7 @@ let rootCommandHandler
             info "Computing palette"
             for i = 0 to front.Length - 1 do
               let pix = front.[i]
-              if pix.A > 127uy then
+              if pix.A > cutoff then
                 palette.TryAdd (pix.Rgb, palette.Count) |> ignore
 
             infof "Found %d palette entries" palette.Count
@@ -447,10 +486,10 @@ let rootCommandHandler
                 for x = 0 to width-1 do
                   let fpix = front.[yoff+x]
                   if rgb.R = fpix.R && rgb.G = fpix.G && rgb.B = fpix.B then
-                    if fpix.A > 127uy then
+                    if fpix.A > cutoff then
                       if enableIframe then
                         let bpix = back.[yoff+x]
-                        if bpix.A > 127uy && (bpix.R = fpix.R && bpix.G = fpix.G && bpix.B = fpix.B) then
+                        if bpix.A > cutoff && (bpix.R = fpix.R && bpix.G = fpix.G && bpix.B = fpix.B) then
                           // Same as previous frame. Don't generate sixel
                           ()
                         else
@@ -487,7 +526,7 @@ let rootCommandHandler
           if enableIframe then
             for i = 0 to front.Length - 1 do
               let fpix = front.[i]
-              if fpix.A <= 127uy then
+              if fpix.A <= cutoff then
                 // The front pixel is transparent. Copy back into front
                 front.[i] <- back.[i]
 
@@ -526,6 +565,7 @@ let main
       imageRatioOption
       skipFramesOption
       takeFramesOption
+      transparencyCutoffOption
       overwriteOutputOption
       escapeOption
       enableIframeOption
@@ -534,5 +574,18 @@ let main
     |> Array.iter rootCommand.AddOption
 
   rootCommand.SetHandler rootCommandHandler
+
+  let readmeCommand = Command ("readme", "Displays fsimg2pixel's README file")
+  readmeCommand.SetHandler readmeCommandHandler
+  rootCommand.AddCommand readmeCommand
+
+  let licenseCommand = Command ("license", "Displays fsimg2pixel's LICENSE file")
+  licenseCommand.SetHandler licenseCommandHandler
+  rootCommand.AddCommand licenseCommand
+
+  let noticeCommand = Command ("notice", "Displays fsimg2pixel's NOTICE file")
+  noticeCommand.SetHandler noticeCommandHandler
+  rootCommand.AddCommand noticeCommand
+
 
   rootCommand.Invoke args
