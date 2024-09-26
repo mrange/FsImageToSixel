@@ -13,15 +13,15 @@ For more information on Sixel, check out the [Wikipedia article](https://en.wiki
 
 ```bash
 # Converts a PNG to a sixel image and display it in the terminal
-dotnet tool fsimg2sixel -i theimage.png
+fsimg2sixel -i theimage.png
 ```
 
 ```bash
 # Converts a PNG to a sixel image and writes it to a text file
-dotnet tool fsimg2sixel -i theimage.png -o sixel.txt
+fsimg2sixel -i theimage.png -o sixel.txt
 ```
 
 ```bash
 # Prints the help
-dotnet tool fsimg2sixel --help
+fsimg2sixel --help
 ```
