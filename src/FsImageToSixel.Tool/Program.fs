@@ -183,6 +183,29 @@ type OutputImagePath  =
     | OutputImagePath (_, fullPath) -> fullPath
     | OutputImageToStdOut           -> "STDOUT"
 
+let fillPixels (pixels : Rgba32 array) (frame : Rgba32 ImageFrame) width height : unit =
+  let pa =
+    PixelAccessorAction<Rgba32> (
+      fun a ->
+        if a.Width <> width then
+          abortf 194 "Frame width %d don't match image width %d" a.Width width
+        if a.Height <> height then
+          abortf 195 "Frame height %d don't match image height %d" a.Height height
+        for y = 0 to height - 1 do
+          let yoff = width*y
+          let row = a.GetRowSpan y
+          for x = 0 to width - 1 do
+            pixels.[yoff+x] <- row.[x]
+
+    )
+  frame.ProcessPixelRows pa
+
+let printFile name =
+  let baseDir  = AppDomain.CurrentDomain.BaseDirectory
+  let fileName = Path.GetFullPath (Path.Combine (baseDir, name))
+  let text     = File.ReadAllText fileName
+  Console.WriteLine text
+
 module Loops =
   let inline RLEToken escape (sb : StringBuilder) rep current =
     let tbw = char (63+(current&&&0x3F))
@@ -209,29 +232,69 @@ module Loops =
     else
       RLEToken escape sb rep current
 
+  let rec countColorsInFrame 
+    maxNoOfColors 
+    cutoff 
+    (palette  : Dictionary<Rgb24, int>) 
+    (front    : Rgba32 array          ) 
+    i 
+    : int =
+    if i < front.Length - 1 && palette.Count <= maxNoOfColors then
+      let pix = front.[i]
+      if pix.A > cutoff then
+        palette.TryAdd (pix.Rgb, palette.Count) |> ignore
+      countColorsInFrame 
+        maxNoOfColors 
+        cutoff 
+        palette 
+        front 
+        (i + 1)
+    else
+      palette.Count
 
-let fillPixels (pixels : Rgba32 array) (frame : Rgba32 ImageFrame) width height : unit =
-  let pa =
-    PixelAccessorAction<Rgba32> (
-      fun a ->
-        if a.Width <> width then
-          abortf 194 "Frame width %d don't match image width %d" a.Width width
-        if a.Height <> height then
-          abortf 195 "Frame height %d don't match image height %d" a.Height height
-        for y = 0 to height - 1 do
-          let yoff = width*y
-          let row = a.GetRowSpan y
-          for x = 0 to width - 1 do
-            pixels.[yoff+x] <- row.[x]
+  let rec countColorsInImage 
+    maxNoOfColors 
+    cutoff 
+    width
+    height
+    (palette  : Dictionary<Rgb24, int>) 
+    (front    : Rgba32 array          ) 
+    (image    : Rgba32 Image          ) 
+    maxColorsFoundInFrame 
+    i 
+    : int =
+    if i < image.Frames.Count - 1 then
+      let frame = image.Frames.[i]
 
-    )
-  frame.ProcessPixelRows pa
+      fillPixels front frame width height
 
-let printFile name =
-  let baseDir  = AppDomain.CurrentDomain.BaseDirectory
-  let fileName = Path.GetFullPath (Path.Combine (baseDir, name))
-  let text     = File.ReadAllText fileName
-  Console.WriteLine text
+      palette.Clear ()
+
+      let count = 
+        countColorsInFrame 
+          maxNoOfColors 
+          cutoff 
+          palette 
+          front 
+          0
+
+      if count > maxNoOfColors then 
+        count
+      else
+        let maxColorsFoundInFrame = max maxColorsFoundInFrame count
+        countColorsInImage
+          maxNoOfColors
+          cutoff
+          width
+          height
+          palette
+          front
+          image
+          maxColorsFoundInFrame
+          (i + 1)
+
+    else
+      maxColorsFoundInFrame
 
 let noticeCommandHandler
   (ctx            : InvocationContext )
@@ -384,20 +447,43 @@ let rootCommandHandler
           ignore <| ctx.Resize options
         image.Mutate mutator
 
-      do
-        hilif "Quantizing image to %d colors" maxNoOfColors
-        let mutator (ctx : IImageProcessingContext) =
-          let options   = QuantizerOptions (MaxColors = maxNoOfColors)
-          let quantizer = WuQuantizer options
-          ignore <| ctx.Quantize quantizer
-        image.Mutate mutator
-
       let frameCount          = image.Frames.Count
       let stop                = min frameCount (skipFrames+takeFrames)
       let effectiveFrameCount = stop - skipFrames
 
       infof "Found %d frames"   frameCount
       infof "Writing %d frames" effectiveFrameCount
+
+      let width   = image.Width
+      let height  = image.Height
+
+      let mutable back  : Rgba32 array  = Array.zeroCreate (if enableIframe then width*height else 1)
+      let mutable front : Rgba32 array  = Array.zeroCreate (width*height)
+
+      let palette = Dictionary ()
+
+      let maxColorsFoundInFrame =
+        hili "Finding max colors per frame"
+        Loops.countColorsInImage
+          maxNoOfColors 
+          cutoff 
+          width
+          height
+          palette
+          front
+          image
+          0
+          0
+
+      if maxColorsFoundInFrame <= maxNoOfColors then
+        infof "No need to quantitize colors as each frame contains at most %d colors which is less or equal to %d" maxColorsFoundInFrame maxNoOfColors
+      else
+        hilif "Quantizing image to %d colors" maxNoOfColors
+        let mutator (ctx : IImageProcessingContext) =
+          let options   = QuantizerOptions (MaxColors = maxNoOfColors)
+          let quantizer = WuQuantizer options
+          ignore <| ctx.Quantize quantizer
+        image.Mutate mutator
 
       if whatIf then
         warn "Skipping writing of Sixel image"
@@ -409,7 +495,6 @@ let rootCommandHandler
         | OutputImageToStdOut ->
           ()
 
-        let palette = Dictionary ()
         let sb      = StringBuilder ()
 
         let inline str (s : string) = sb.Append s |> ignore
@@ -417,13 +502,8 @@ let rootCommandHandler
         let inline num (i : int   ) = sb.Append i |> ignore
         let strf fmt                = kprintf str fmt
 
-        let width   = image.Width
-        let height  = image.Height
-
         let empty         : int array     = Array.zeroCreate width
         let sixels        : int array     = Array.zeroCreate width
-        let mutable back  : Rgba32 array  = Array.zeroCreate (if enableIframe then width*height else 1)
-        let mutable front : Rgba32 array  = Array.zeroCreate (width*height)
 
         for frameNo = skipFrames to stop-1 do
           hilif "Processing frame #%d" (frameNo + 1)
