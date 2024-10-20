@@ -207,7 +207,8 @@ module Loops =
         RLEToken escape sb rep current
         RLE escape sixels sb 1 next (i + 1)
     else
-      RLEToken escape sb rep current
+      if (current&&&0x3F) <> 0 then
+        RLEToken escape sb rep current
 
 
 let fillPixels (pixels : Rgba32 array) (frame : Rgba32 ImageFrame) width height : unit =
