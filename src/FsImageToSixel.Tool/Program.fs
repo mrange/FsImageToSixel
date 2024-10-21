@@ -476,10 +476,10 @@ let rootCommandHandler
           let h6 = height/6
           for y6 = 0 to h6-1 do
             let y = y6*6
+            let rem = min (height - y - 1) 5
             for i, rgb in palette do
               let mutable ones = 0
               Array.Copy (empty, sixels, sixels.Length)
-              let rem = min (height - y - 1) 5
               for i = 0 to rem do
                 let bit   = 1 <<< i
                 let y     = y+i
