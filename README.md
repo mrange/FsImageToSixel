@@ -28,6 +28,12 @@ dotnet run -c Release -- -i ../../assets/dotnet-bot_branded.png -s 100
 
 ## Generate reference assets
 
+Use cake:
+```bash
+dotnet tool run dotnet-cake -- --Target=GenerateReferenceAssets
+```
+
+Or do it manually:
 ```bash
 cd src/FsImageToSixel.Tool
 dotnet run -c Release -- -i ../../assets/dotnet-bot_branded.png -s 100 -o ../../assets/dotnet-bot_branded.txt -oo
