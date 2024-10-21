@@ -410,8 +410,9 @@ let rootCommandHandler
         | OutputImageToStdOut ->
           ()
 
-        let palette = Dictionary ()
-        let sb      = StringBuilder ()
+        let palette     = Dictionary ()
+        let seenPalette = Dictionary ()
+        let sb          = StringBuilder ()
 
         let inline str (s : string) = sb.Append s |> ignore
         let inline ch  (c : char  ) = sb.Append c |> ignore
@@ -448,11 +449,11 @@ let rootCommandHandler
             if palette.Count > maxNoOfColors then
               abort 199 "The palette contains more than the desired max no of colors"
 
-          let palette =
+          let paletteArray =
             palette
             |> Array.ofSeq
-            |> Array.map (fun kv -> kv.Value, kv.Key)
-            |> Array.sortBy fst
+            |> Array.map (fun kv -> kv.Key, kv.Value)
+            |> Array.sortBy snd
 
           // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
           hili "Generating Sixel image"
@@ -469,17 +470,26 @@ let rootCommandHandler
           // Start the sixel bitmap
           str sixelPrelude
 
-          for i, rgb in palette do
+          for rgb, i in paletteArray do
             let inline f (v : byte) = int (round (float v*100./255.))
             strf "#%d;2;%d;%d;%d" i (f rgb.R) (f rgb.G) (f rgb.B)
 
           let h6 = height/6
           for y6 = 0 to h6-1 do
             let y = y6*6
-            for i, rgb in palette do
+            let rem = min (height - y - 1) 5
+            seenPalette.Clear ()
+            for i = 0 to rem do
+              let y     = y+i
+              let yoff  = width*y
+              for x = 0 to width-1 do
+                let fpix = front.[yoff+x]
+                seenPalette.TryAdd (fpix.Rgb, palette.[fpix.Rgb]) |> ignore
+            for kv in seenPalette do
+              let rgb = kv.Key
+              let i = kv.Value
               let mutable ones = 0
               Array.Copy (empty, sixels, sixels.Length)
-              let rem = min (height - y - 1) 5
               for i = 0 to rem do
                 let bit   = 1 <<< i
                 let y     = y+i
