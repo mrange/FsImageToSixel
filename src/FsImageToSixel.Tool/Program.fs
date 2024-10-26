@@ -576,15 +576,15 @@ let main
 
   rootCommand.SetHandler rootCommandHandler
 
-  let readmeCommand = Command ("readme", "Displays fsimg2pixel's README file")
+  let readmeCommand = Command ("readme", "Displays fsimg2sixel's README file")
   readmeCommand.SetHandler readmeCommandHandler
   rootCommand.AddCommand readmeCommand
 
-  let licenseCommand = Command ("license", "Displays fsimg2pixel's LICENSE file")
+  let licenseCommand = Command ("license", "Displays fsimg2sixel's LICENSE file")
   licenseCommand.SetHandler licenseCommandHandler
   rootCommand.AddCommand licenseCommand
 
-  let noticeCommand = Command ("notice", "Displays fsimg2pixel's NOTICE file")
+  let noticeCommand = Command ("notice", "Displays fsimg2sixel's NOTICE file")
   noticeCommand.SetHandler noticeCommandHandler
   rootCommand.AddCommand noticeCommand
 
