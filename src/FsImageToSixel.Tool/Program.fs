@@ -54,30 +54,31 @@ open SixLabors.ImageSharp.Processing.Processors.Quantization
 
 exception AbortException of (int)
 
-let writeToConsole (cc : ConsoleColor) (prelude : string) (msg : string) =
-  let occ = Console.ForegroundColor
-  Console.ForegroundColor <- cc
-  try
-    Console.Write prelude
-    Console.Write " - "
-    Console.WriteLine msg
-  finally
-    Console.ForegroundColor <- occ
+let writeToConsole silent (cc : ConsoleColor) (prelude : string) (msg : string) =
+  if not silent then
+    let occ = Console.ForegroundColor
+    Console.ForegroundColor <- cc
+    try
+      Console.Write prelude
+      Console.Write " - "
+      Console.WriteLine msg
+    finally
+      Console.ForegroundColor <- occ
 
-let good    msg = writeToConsole ConsoleColor.Green    "GOOD" msg
-let hili    msg = writeToConsole ConsoleColor.Cyan     "HILI" msg
-let info    msg = writeToConsole ConsoleColor.Gray     "INFO" msg
-let warn    msg = writeToConsole ConsoleColor.Yellow   "WARN" msg
-let fail    msg = writeToConsole ConsoleColor.Red      "FAIL" msg
+let good silent msg   = writeToConsole silent ConsoleColor.Green    "GOOD" msg
+let hili silent msg   = writeToConsole silent ConsoleColor.Cyan     "HILI" msg
+let info silent msg   = writeToConsole silent ConsoleColor.Gray     "INFO" msg
+let warn silent msg   = writeToConsole silent ConsoleColor.Yellow   "WARN" msg
+let fail silent msg   = writeToConsole silent ConsoleColor.Red      "FAIL" msg
 
-let goodf  fmt  = kprintf good fmt
-let hilif  fmt  = kprintf hili fmt
-let infof  fmt  = kprintf info fmt
-let warnf  fmt  = kprintf warn fmt
-let failf  fmt  = kprintf fail fmt
+let goodf silent fmt  = kprintf (good silent) fmt
+let hilif silent fmt  = kprintf (hili silent) fmt
+let infof silent fmt  = kprintf (info silent) fmt
+let warnf silent fmt  = kprintf (warn silent) fmt
+let failf silent fmt  = kprintf (fail silent) fmt
 
 let abort exitCode msg =
-  fail msg
+  fail false msg
   raise (AbortException exitCode)
 
 let abortf exitCode fmt  = kprintf (abort exitCode) fmt
@@ -139,6 +140,13 @@ let transparencyCutoffOption =
     , getDefaultValue = fun () -> 127uy
     )
 
+let ditherScaleOption =
+  Option<float32>(
+      aliases         = [|"-ds"; "--dither-scale"|]
+    , description     = "The dither scale, controls the amount of dithering when reducing number of colors (0.0-1.0)"
+    , getDefaultValue = fun () -> QuantizerConstants.MaxDitherScale
+    )
+
 let overwriteOutputOption =
   Option<bool>(
       aliases         = [|"-oo"; "--overwrite-output"|]
@@ -166,6 +174,14 @@ let whatIfOption =
     , description     = "Reads the image and compute size but don't generate the sixel image"
     , getDefaultValue = fun () -> false
     )
+
+let silentOption      =
+  Option<bool>(
+      aliases         = [|"-z"; "--silent"|]
+    , description     = "Suppresses non-error messages"
+    , getDefaultValue = fun () -> false
+    )
+
 
 type InputImagePath   =
   | InputImagePath of string*string
@@ -271,10 +287,12 @@ let rootCommandHandler
   let skipFrames      = getValue skipFramesOption
   let takeFrames      = getValue takeFramesOption
   let cutoff          = getValue transparencyCutoffOption
+  let ditherScale     = getValue ditherScaleOption
   let overwriteOutput = getValue overwriteOutputOption
   let escape          = getValue escapeOption
   let enableIframe    = getValue enableIframeOption
   let whatIf          = getValue whatIfOption
+  let silent          = getValue silentOption
 
   let exitCode =
     try
@@ -288,20 +306,21 @@ let rootCommandHandler
         else
           OutputImagePath (output, Path.GetFullPath output)
 
-      hili  "fsimg2sixel - Converts image to sixel image"
-      infof "  Input image path         : %s"   input.Pretty
-      infof "  Output sixel image path  : %s"   output.Pretty
-      infof "  Max no of colors used    : %d"   maxNoOfColors
-      infof "  Scale image by (%%)       : %d"  scaleImage
-      infof "  Desired image ratio (%%)  : %d"  imageRatio
-      infof "  Max no of colors used    : %d"   maxNoOfColors
-      infof "  Skip # frames            : %d"   skipFrames
-      infof "  Take at least # frames   : %d"   takeFrames
-      infof "  Transparency cutoff      : %d"   cutoff
-      infof "  Overwrite sixel image    : %A"   overwriteOutput
-      infof "  Escape sixel image output: %A"   escape
-      infof "  'iframe' compression     : %A"   enableIframe
-      infof "  Skip writing sixel image : %A"   whatIf
+      hili  silent "fsimg2sixel - Converts image to sixel image"
+      infof silent "  Input image path         : %s"   input.Pretty
+      infof silent "  Output sixel image path  : %s"   output.Pretty
+      infof silent "  Max no of colors used    : %d"   maxNoOfColors
+      infof silent "  Scale image by (%%)       : %d"  scaleImage
+      infof silent "  Desired image ratio (%%)  : %d"  imageRatio
+      infof silent "  Max no of colors used    : %d"   maxNoOfColors
+      infof silent "  Skip # frames            : %d"   skipFrames
+      infof silent "  Take at least # frames   : %d"   takeFrames
+      infof silent "  Transparency cutoff      : %d"   cutoff
+      infof silent "  Dither scale             : %f"   ditherScale
+      infof silent "  Overwrite sixel image    : %A"   overwriteOutput
+      infof silent "  Escape sixel image output: %A"   escape
+      infof silent "  'iframe' compression     : %A"   enableIframe
+      infof silent "  Skip writing sixel image : %A"   whatIf
 
       let (InputImagePath (_, fullInputPath)) = input
 
@@ -364,18 +383,18 @@ let rootCommandHandler
           if split |> Array.contains "4" |> not then
             abort 198 "Your terminal doesn't seem to support sixel output, you can still write the image to a file using -o"
 
-      hilif "Loading image: %s" fullInputPath
+      hilif silent "Loading image: %s" fullInputPath
       use image = Image.Load<Rgba32> fullInputPath
 
-      infof "Image size is: %dx%d" image.Width image.Height
+      infof silent "Image size is: %dx%d" image.Width image.Height
 
       let desiredWidth  = int (round (float image.Width )*(float scaleImage/100.)*(float imageRatio/100.))
       let desiredHeight = int (round (float image.Height)*(float scaleImage/100.))
 
-      infof "Desired image size is: %dx%d" desiredWidth desiredHeight
+      infof silent "Desired image size is: %dx%d" desiredWidth desiredHeight
 
-      do
-        hilif "Resizing image from %dx%d to: %dx%d" image.Width image.Height desiredWidth desiredHeight
+      if desiredWidth <> image.Width && desiredHeight <> image.Height then
+        hilif silent "Resizing image from %dx%d to: %dx%d" image.Width image.Height desiredWidth desiredHeight
         let mutator (ctx : IImageProcessingContext) =
           let options = ResizeOptions (
               Mode    = ResizeMode.Stretch
@@ -384,11 +403,16 @@ let rootCommandHandler
             )
           ignore <| ctx.Resize options
         image.Mutate mutator
+      else
+        hilif silent "Skipping resize of image"
 
       do
-        hilif "Quantizing image to %d colors" maxNoOfColors
+        hilif silent "Quantizing image to %d colors" maxNoOfColors
         let mutator (ctx : IImageProcessingContext) =
-          let options   = QuantizerOptions (MaxColors = maxNoOfColors)
+          let options   = QuantizerOptions (
+              MaxColors   = maxNoOfColors
+            , DitherScale = ditherScale
+            )
           let quantizer = WuQuantizer options
           ignore <| ctx.Quantize quantizer
         image.Mutate mutator
@@ -397,11 +421,11 @@ let rootCommandHandler
       let stop                = min frameCount (skipFrames+takeFrames)
       let effectiveFrameCount = stop - skipFrames
 
-      infof "Found %d frames"   frameCount
-      infof "Writing %d frames" effectiveFrameCount
+      infof silent "Found %d frames"   frameCount
+      infof silent "Writing %d frames" effectiveFrameCount
 
       if whatIf then
-        warn "Skipping writing of Sixel image"
+        warn silent "Skipping writing of Sixel image"
       else
         match output with
         | OutputImagePath (_, fullPath) ->
@@ -427,7 +451,7 @@ let rootCommandHandler
         let mutable front : Rgba32 array  = Array.zeroCreate (width*height)
 
         for frameNo = skipFrames to stop-1 do
-          hilif "Processing frame #%d" (frameNo + 1)
+          hilif silent "Processing frame #%d" (frameNo + 1)
 
           let frame = image.Frames.[frameNo]
 
@@ -438,13 +462,13 @@ let rootCommandHandler
           fillPixels front frame width height
 
           do
-            info "Computing palette"
+            info silent "Computing palette"
             for i = 0 to front.Length - 1 do
               let pix = front.[i]
               if pix.A > cutoff then
                 palette.TryAdd (pix.Rgb, palette.Count) |> ignore
 
-            infof "Found %d palette entries" palette.Count
+            infof silent "Found %d palette entries" palette.Count
             if palette.Count > maxNoOfColors then
               abort 199 "The palette contains more than the desired max no of colors"
 
@@ -455,7 +479,7 @@ let rootCommandHandler
             |> Array.sortBy fst
 
           // Sixels explained here: https://en.wikipedia.org/wiki/Sixel
-          hili "Generating Sixel image"
+          hili silent "Generating Sixel image"
 
           let toTop, sixelPrelude, sixelEpilogue =
             if escape then
@@ -519,7 +543,7 @@ let rootCommandHandler
 
           match output with
           | OutputImagePath (_, fullPath) ->
-            hilif "Writing sixel image: %s" fullPath
+            hilif silent "Writing sixel image: %s" fullPath
             File.AppendAllText(fullPath, sixelData)
           | OutputImageToStdOut ->
             Console.Write sixelData
@@ -535,7 +559,7 @@ let rootCommandHandler
             let tmp = front
             front <- back
             back  <- tmp
-      good "We are done"
+      good silent "We are done"
 
       0
     with
@@ -567,10 +591,12 @@ let main
       skipFramesOption
       takeFramesOption
       transparencyCutoffOption
+      ditherScaleOption
       overwriteOutputOption
       escapeOption
       enableIframeOption
       whatIfOption
+      silentOption
     |] : Option array)
     |> Array.iter rootCommand.AddOption
 
